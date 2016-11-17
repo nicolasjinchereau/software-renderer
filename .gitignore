@@ -1,0 +1,7 @@
+/Debug/
+/Release/
+*.VC.opendb
+*.VC.db
+!libfbxsdk.dll
+!fbxsdk/lib/vs2015/x86/debug/*
+!fbxsdk/lib/vs2015/x86/release/*
