@@ -64,6 +64,7 @@ class RenderingApp : public Application
     vector<shared_ptr<Texture>> textures;
     shared_ptr<UnlitShader> unlitShader;
     shared_ptr<LitShader> litShader;
+    shared_ptr<LitCutoutShader> litCutoutShader;
     shared_ptr<Scene> scene;
 
     shared_ptr<Texture> skyDayTex;
@@ -101,6 +102,7 @@ public:
         // create shaders
         unlitShader = AlignedMakeShared<UnlitShader, 16>();
         litShader = AlignedMakeShared<LitShader, 16>();
+        litCutoutShader = AlignedMakeShared<LitCutoutShader, 16>();
 
         // load textures
         auto terrainTex = AlignedMakeShared<Texture, 16>("textures/terrain.tga", filterMode);
@@ -144,9 +146,12 @@ public:
         // create scene objects
         auto houseObj = AlignedMakeShared<SceneObject, 16>("house", houseModel, houseTex, litShader);
         auto house2Obj = AlignedMakeShared<SceneObject, 16>("house2", house2Model, house2Tex, litShader);
-        auto plants1Obj = AlignedMakeShared<SceneObject, 16>("plants1", plantsModel, plantsTex, litShader);
-        auto plants2Obj = AlignedMakeShared<SceneObject, 16>("plants2", plantsModel, plantsTex, litShader);
-        auto plants3Obj = AlignedMakeShared<SceneObject, 16>("plants3", plantsModel, plantsTex, litShader);
+        auto plants1Obj = AlignedMakeShared<SceneObject, 16>("plants1", plantsModel, plantsTex, litCutoutShader);
+        auto plants2Obj = AlignedMakeShared<SceneObject, 16>("plants2", plantsModel, plantsTex, litCutoutShader);
+        auto plants3Obj = AlignedMakeShared<SceneObject, 16>("plants3", plantsModel, plantsTex, litCutoutShader);
+        plants1Obj->backfaceCullingEnabled = false;
+        plants2Obj->backfaceCullingEnabled = false;
+        plants3Obj->backfaceCullingEnabled = false;
         auto carObj = AlignedMakeShared<SceneObject, 16>("car", carModel, carTex, litShader);
         auto lampObj = AlignedMakeShared<SceneObject, 16>("lamp", lampModel, lampTex, litShader);
         auto rockObj = AlignedMakeShared<SceneObject, 16>("rock", rockModel, rockTex, litShader);
@@ -283,6 +288,8 @@ public:
 
         case KeyCode::L:
             litShader->enableLighting = !litShader->enableLighting;
+            litCutoutShader->enableLighting = litShader->enableLighting;
+
             scene->FindObject("sky")->texture = litShader->enableLighting?
                 skyNightTex : skyDayTex;
 

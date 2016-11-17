@@ -19,7 +19,7 @@ public:
     virtual void Accept(ShaderVisitor* visitor) = 0;
     virtual void Prepare(Scene* scene, SceneObject* obj) = 0;
     virtual Vertex ProcessVertex(const Vertex &in) = 0;
-    virtual Color ProcessPixel(const Vertex &in, float mipLevel) = 0;
+    virtual Color ProcessPixel(const Vertex &in, float mipLevel, bool& discard) = 0;
 };
 
 class ShaderVisitor final

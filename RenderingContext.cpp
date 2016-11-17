@@ -375,18 +375,18 @@ void RenderingContext::ExtrapolatePlane(const Vertex& v0, const Vertex& v1, cons
     v10 = v0 * uc + v1 * vc + v2 * wc;
 }
 
-float RenderingContext::CalcMipLevel(const Vertex& fCurr, const Vertex& xNext, const Vertex& yNext, Texture* tex)
+float RenderingContext::CalcMipLevel(const Vertex& fCurr, const Vertex& xNext, const Vertex& yNext, const Vec2& texSize, float mipBias, int mipCount)
 {
     if(!_mipmapsEnabled)
         return 0.0f;
 
     Vec2 uv00 = fCurr.texcoord * (1.0f / fCurr.position.w);
-    float uv01 = xNext.texcoord.x * (1.0f / xNext.position.w);
-    float uv10 = yNext.texcoord.y * (1.0f / yNext.position.w);
-    Vec2 uvDt = Vec2(uv01 - uv00.x, uv10 - uv00.y).Scale(tex->size());
+    float uv01 = xNext.texcoord.x / xNext.position.w;
+    float uv10 = yNext.texcoord.y / yNext.position.w;
+    Vec2 uvDt = Vec2(uv01 - uv00.x, uv10 - uv00.y).Scale(texSize);
     
     float mipLevel = 0.5f * Math::Log2(max(uvDt.x * uvDt.x, uvDt.y * uvDt.y));
-    return Math::Clamp(mipLevel + tex->mipmapBias(), 0.0f, tex->mipmapCount() - 1.0f);
+    return Math::Clamp(mipLevel + mipBias, 0.0f, mipCount - 1.0f);
 }
 
 void RenderingContext::RasterizeHalfSpace(const Rect& rect, const Vertex& v0, const Vertex& v1, const Vertex& v2, DrawCall* drawCall)
@@ -449,6 +449,10 @@ void RenderingContext::RasterizeHalfSpace(const Rect& rect, const Vertex& v0, co
     
     Vertex yv = v00;
 
+    Vec2 texSize = tex->size();
+    float mipBias = tex->mipmapBias();
+    int mipCount = tex->mipmapCount();
+    
     for(int y = miny; y < maxy; y++)
     {
         Vec4 Cx = Cy;
@@ -476,20 +480,22 @@ void RenderingContext::RasterizeHalfSpace(const Rect& rect, const Vertex& v0, co
 
         for( ; x < maxx; ++x)
         {
-            if(Cx.x > 0 && Cx.y > 0 && Cx.z > 0 || (!backfaceCullingEnabled && Cx.x < 0 && Cx.y < 0 && Cx.z < 0))
+            if(!(Cx.x > 0 && Cx.y > 0 && Cx.z > 0 || (!backfaceCullingEnabled && Cx.x < 0 && Cx.y < 0 && Cx.z < 0)))
+                break;
+
+            if(xv.position.w > *depthBuffer)
             {
-                if(xv.position.w > *depthBuffer)
+                float mipLevel = CalcMipLevel(xv, xv + xDelta, xv + yDelta, texSize, mipBias, mipCount);
+                Vertex frag = xv / xv.position.w;
+                frag.normal.Normalize();
+
+                bool discard = false;
+                Color output = Color::Clamp(shader->ProcessPixel(frag, mipLevel, discard));
+                if(!discard)
                 {
-                    float mipLevel = CalcMipLevel(xv, xv + xDelta, xv + yDelta, tex);
-                    Vertex frag = xv * (1.0f / xv.position.w);
-                    frag.normal.Normalize();
-                    *colorBuffer = Color::Clamp(shader->ProcessPixel(frag, mipLevel));
+                    *colorBuffer = output;
                     *depthBuffer = xv.position.w;
                 }
-            }
-            else
-            {
-                break;
             }
 
             ++colorBuffer;
@@ -638,6 +644,10 @@ void RenderingContext::FillTriangle(const Rect& rect, const Vertex& v0, const Ve
     Vertex ldy = (p1l - p0l) * dy;
     Vertex rdy = (p1r - p0r) * dy;
     
+    Vec2 texSize = tex->size();
+    float mipBias = tex->mipmapBias();
+    int mipCount = tex->mipmapCount();
+
     // fill scanlines
     for(int y = y0; y <= y1; ++y)
     {
@@ -654,11 +664,16 @@ void RenderingContext::FillTriangle(const Rect& rect, const Vertex& v0, const Ve
         {
             if(xv.position.w > *depthBuffer)
             {
-                float mipLevel = CalcMipLevel(xv, xv + xDelta, xv + yDelta, tex);
-                Vertex frag = xv * (1.0f / xv.position.w);
+                float mipLevel = CalcMipLevel(xv, xv + xDelta, xv + yDelta, texSize, mipBias, mipCount);
+                Vertex frag = xv / xv.position.w;
                 frag.normal.Normalize();
-                *colorBuffer = Color::Clamp(shader->ProcessPixel(frag, mipLevel));
-                *depthBuffer = xv.position.w;
+                bool discard = false;
+                Color output = Color::Clamp(shader->ProcessPixel(frag, mipLevel, discard));
+                if(!discard)
+                {
+                    *colorBuffer = output;
+                    *depthBuffer = xv.position.w;
+                }
             }
 
             ++colorBuffer;

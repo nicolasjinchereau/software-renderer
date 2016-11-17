@@ -53,7 +53,7 @@ public:
         return out;
     }
 
-    virtual Color ProcessPixel(const Vertex &in, float mipLevel) override
+    virtual Color ProcessPixel(const Vertex &in, float mipLevel, bool& discard) override
     {
         Color tex = texture->GetPixel(in.texcoord, mipLevel);
         
@@ -61,6 +61,39 @@ public:
         {
             if(texture->channels() == 4 && tex.a > 0.5f)
                 return tex;
+
+            Color lum = Color::black;
+
+            for(auto& light : scene->lights)
+                lum += light->Apply(in.worldPos, in.normal, eyePos, eyeDir);
+
+            return tex * lum;
+        }
+        else
+        {
+            return tex;
+        }
+    }
+};
+
+class LitCutoutShader : public LitShader
+{
+public: 
+    virtual void Accept(ShaderVisitor* visitor) override {
+        visitor->Visit(this);
+    }
+
+    virtual Color ProcessPixel(const Vertex &in, float mipLevel, bool& discard) override
+    {
+        Color tex = texture->GetPixel(in.texcoord, mipLevel);
+        
+        if(enableLighting)
+        {
+            if(tex.a < 0.5f)
+            {
+                discard = true;
+                return Color::clear;
+            }
 
             Color lum = Color::black;
 
@@ -101,7 +134,7 @@ public:
         return out;
     }
 
-    virtual Color ProcessPixel(const Vertex &in, float mipLevel) override {
+    virtual Color ProcessPixel(const Vertex &in, float mipLevel, bool& discard) override {
         return texture->GetPixel(in.texcoord, mipLevel);
     }
 };

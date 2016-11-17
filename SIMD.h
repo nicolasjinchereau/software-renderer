@@ -174,12 +174,27 @@ inline void mmul(const float* m0, const float* m1, float* mOut)
 	_mm_store_ps(mOut + 12, r4c);
 }
 
-inline void vblend(const int (&v0)[4], const float* v1, float *vOut)
+//v0: p00, p01, p10, p11
+//v1: u0, u1, v0, v1
+inline void vblend2x2(const int (&v0)[4], const float* v1, float *vOut)
 {
     assert(IsAligned(v1, 16));
 	assert(IsAligned(vOut, 16));
 
-    __m128 w = _mm_load_ps(v1);
+    __m128 coeffs = _mm_load_ps(v1);
+
+    //u0, u1, u0, u1
+    __m128 us = _mm_movelh_ps(coeffs, coeffs);
+
+    //v0, v0, v1, v1
+    __m128 vs = _mm_unpackhi_ps(coeffs, coeffs);
+
+    //u0 * v0
+    //u1 * v0
+    //u0 * v1
+    //u1 * v1
+    __m128 w = _mm_mul_ps(us, vs);
+
     __m128 maxChan = _mm_set_ps1(255.0f);
 
     __m128 c0 = _mm_cvtepi32_ps(_mm_cvtepu8_epi32(_mm_cvtsi32_si128(v0[0])));

@@ -216,19 +216,24 @@ Color Texture::GetBilinear(const Vec2 &uv, float mipLevel)
     Color32* p10 = p00 + map_w * yoff;
     Color32* p11 = p10 + xoff;
 
+#if USE_SSE
+    alignas(16) float coeffs[4]; // u0, u1, v0, v1
+    coeffs[1] = x - (float)ix;
+    coeffs[0] = 1 - coeffs[1];
+    coeffs[3] = y - (float)iy;
+    coeffs[2] = 1 - coeffs[3];
+
+    int colors[4]{ *(int*)p00, *(int*)p01, *(int*)p10, *(int*)p11 };
+
+    Color ret;
+    vblend2x2(colors, coeffs, &ret.r);
+    return ret;
+#else
     float u1 = x - (float)ix;
     float u0 = 1 - u1;
     float v1 = y - (float)iy;
     float v0 = 1 - v1;
 
-#if USE_SSE
-    alignas(16) float weights[4]{ v0 * u0, v0 * u1, v1 * u0, v1 * u1 };
-    int colors[4]{ *(int*)p00, *(int*)p01, *(int*)p10, *(int*)p11 };
-
-    Color ret;
-    vblend(colors, weights, &ret.r);
-    return ret;
-#else
     float w00 = v0 * u0;
     float w01 = v0 * u1;
     float w10 = v1 * u0;

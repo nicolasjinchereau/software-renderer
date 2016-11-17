@@ -138,9 +138,9 @@ public:
     {
         float num = 1.0f / denom;
 #if USE_SSE
-        vmul(&position.x, denom, &position.x);
-        vmul(&normal.x, denom, &normal.x);
-        vmul(&texcoord.y, denom, &texcoord.y);
+        vmul(&position.x, num, &position.x);
+        vmul(&normal.x, num, &normal.x);
+        vmul(&texcoord.y, num, &texcoord.y);
 #else
         position *= num;
         normal   *= num;

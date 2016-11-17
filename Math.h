@@ -678,7 +678,9 @@ namespace Math
 
     template<typename T>
     inline T NormalizedClamp(T x, T lower, T upper) {
-        return Clamp01((x - lower) / (upper - lower));
+        float range = upper - lower;
+        return (range < FLT_EPSILON) ?
+            Clamp01(x - lower) : Clamp01((x - lower) / range);
     }
 
     inline float Snap(float n, float span)
