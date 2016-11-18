@@ -175,18 +175,17 @@ int RenderingContext::ClipDepth(Vertex (&verts)[9], int count)
     Vertex tmp[9];
     int newCount = 0;
 
-    // clip near plan
+    // clip near plane
     for(int i = 0; i < count; ++i)
     {
         Vertex &p0 = verts[i];
         Vertex &p1 = verts[(i + 1) % count];
 
-        bool in0 = p0.position.z >= -p0.position.w;
-        bool in1 = p1.position.z >= -p1.position.w;
-
+        bool in0 = p0.position.z > 0;
+        bool in1 = p1.position.z > 0;
         if(in0 != in1)
         {
-            float t = (-p0.position.w - p0.position.z) / (p1.position.z - p0.position.z + p1.position.w - p0.position.w);
+            float t = -p0.position.z / (p1.position.z - p0.position.z);
             tmp[newCount++] = p0 + (p1 - p0) * t;
         }
 
@@ -531,11 +530,11 @@ void RenderingContext::RasterizeScanline(const Rect& rect, const Vertex& _v0, co
     if(v1.position.y < v0.position.y) swap(v1, v0);
 
     // render top half of triangle if non-empty
-    if(v1.position.y - v0.position.y >= 0.00001f)
+    if(Math::Ceil(v0.position.y) < Math::Ceil(v1.position.y))
     {
         float t = (v1.position.y - v0.position.y) / (v2.position.y - v0.position.y);
         Vertex center = v0 + (v2 - v0) * t;
-        
+    
         if(center.position.x < v1.position.x)
         {
             //   v0
@@ -549,9 +548,9 @@ void RenderingContext::RasterizeScanline(const Rect& rect, const Vertex& _v0, co
             FillTriangle(rect, v0, v1, center, true, drawCall);
         }
     }
-    
+
     // render bottom half of triangle if non-empty
-    if(v2.position.y - v1.position.y >= 0.00001f)
+    if(Math::Ceil(v1.position.y) < Math::Ceil(v2.position.y))
     {
         float t = (v1.position.y - v0.position.y) / (v2.position.y - v0.position.y);
         Vertex center = v0 + (v2 - v0) * t;
@@ -636,31 +635,43 @@ void RenderingContext::FillTriangle(const Rect& rect, const Vertex& v0, const Ve
         yDelta = vEdge * dy;
     }
 
-    int y0 = (int)p0l.position.y;
-    int y1 = min(Math::Ceil(p1l.position.y), (int)_height - 1);
-    
+    int y0 = Math::Ceil(p0l.position.y);
+    int y1 = Math::Min(Math::Ceil(p1l.position.y), (int)_height, rect.y + rect.h);
+
     // calculate the vertical deltas down the edges of the triangle
-    float dy = 1.0f / (float)(y1 - y0);
-    Vertex ldy = (p1l - p0l) * dy;
-    Vertex rdy = (p1r - p0r) * dy;
-    
+    Vertex yDeltaLeft = (p1l - p0l) / (p1l.position.y - p0l.position.y);
+    Vertex yDeltaRight = (p1r - p0r) / (p1r.position.y - p0r.position.y);
+
+    p0l += yDeltaLeft * (Math::Ceil(p0l.position.y) - p0l.position.y);
+    p0r += yDeltaRight * (Math::Ceil(p0r.position.y) - p0r.position.y);
+
     Vec2 texSize = tex->size();
     float mipBias = tex->mipmapBias();
     int mipCount = tex->mipmapCount();
 
-    // fill scanlines
-    for(int y = y0; y <= y1; ++y)
+    int y = y0;
+    int yStart = min(rect.y, y1);
+
+    for( ; y < yStart; ++y)
     {
-        int x = (int)p0l.position.x;
-        int end = min((int)Math::Ceil(p0r.position.x), (int)_width - 1);
+        p0l += yDeltaLeft;
+        p0r += yDeltaRight;
+    }
+
+    // fill scanlines
+    for( ; y < y1; ++y)
+    {
+        int x = Math::Ceil(p0l.position.x);
+        int end = min(Math::Ceil(p0r.position.x), (int)_width);
 
         uint32_t offset = y * _width + x;
         uint32_t *colorBuffer = _colorBuffer.get() + offset;
         float *depthBuffer = _depthBuffer.get() + offset;
 
         Vertex xv = p0l;
+        xv += xDelta * (Math::Ceil(p0l.position.x) - p0l.position.x);
 
-        for( ; x <= end; ++x)
+        for( ; x < end; ++x)
         {
             if(xv.position.w > *depthBuffer)
             {
@@ -681,8 +692,8 @@ void RenderingContext::FillTriangle(const Rect& rect, const Vertex& v0, const Ve
             xv += xDelta;
         }
 
-        p0l += ldy;
-        p0r += rdy;
+        p0l += yDeltaLeft;
+        p0r += yDeltaRight;
     }
 }
 
