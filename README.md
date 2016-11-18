@@ -4,7 +4,7 @@ A software renderer created for educational purposes.
 
 ## Features
 * 2 rasterizers (scanline, half-space/barycentric-interpolation)
-* mipmapping
+* Mipmapping
 * Texture filtering (point, bilinear, trilinear)
 * Customizable shaders
 * Per-pixel lighting (ambient, directional, point, spot)
@@ -18,8 +18,8 @@ A software renderer created for educational purposes.
 ## Performance
 * ~15,000 triangles
 * 4 pixel lights (1 directional, 1 point, 2 spot)
-* mipmapping and bilinear filtering enabled
-* multithread rendering enabled
+* Mipmapping and bilinear filtering enabled
+* Multithread rendering enabled
 * 640x480 resolution
 * i7 3820QM (2.7-3.7 GHz)
 * 60 FPS Average
