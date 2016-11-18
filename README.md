@@ -1,5 +1,7 @@
 A software renderer created for educational purposes.
 
+![demo](screenshots/demo.gif)
+
 ## Features
 * 2 rasterizers (scanline, half-space/barycentric-interpolation)
 * mipmapping
