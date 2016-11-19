@@ -63,9 +63,10 @@ public:
                 return tex;
 
             Color lum = Color::black;
+            Vec3 normal = in.normal.Normalized();
 
             for(auto& light : scene->lights)
-                lum += light->Apply(in.worldPos, in.normal, eyePos, eyeDir);
+                lum += light->Apply(in.worldPos, normal, eyePos, eyeDir);
 
             return tex * lum;
         }
@@ -87,18 +88,18 @@ public:
     {
         Color tex = texture->GetPixel(in.texcoord, mipLevel);
         
+        if(tex.a < 0.5f) {
+            discard = true;
+            return Color::clear;
+        }
+
         if(enableLighting)
         {
-            if(tex.a < 0.5f)
-            {
-                discard = true;
-                return Color::clear;
-            }
-
             Color lum = Color::black;
+            Vec3 normal = in.normal.Normalized();
 
             for(auto& light : scene->lights)
-                lum += light->Apply(in.worldPos, in.normal, eyePos, eyeDir);
+                lum += light->Apply(in.worldPos, normal, eyePos, eyeDir);
 
             return tex * lum;
         }

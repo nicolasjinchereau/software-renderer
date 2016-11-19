@@ -68,7 +68,7 @@ private:
     void RasterizeHalfSpace(const Rect& rect, const Vertex& v0, const Vertex& v1, const Vertex& v2, DrawCall* drawCall);
     void RasterizeScanline(const Rect& rect, const Vertex& v0, const Vertex& v1, const Vertex& v2, DrawCall* drawCall);
     void FillTriangle(const Rect& rect, const Vertex& v0, const Vertex& v1, const Vertex& v2, bool isTop, DrawCall* drawCall);
-    float CalcMipLevel(const Vertex& fCurr, const Vertex& xNext, const Vertex& yNext, const Vec2& texSize, float mipBias, int mipCount);
+    float CalcMipLevel(const Vec2& uv00, const Vec2& uv01, const Vec2& uv10, const Vec2& texSize, float mipBias, int mipCount);
     void ExtrapolatePlane(const Vertex& v0, const Vertex& v1, const Vertex& v2,
                       const Vec2& corner00, const Vec2& corner01, const Vec2& corner10,
                       Vertex& v00, Vertex& v01, Vertex& v10);
