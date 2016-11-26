@@ -22,7 +22,9 @@ public:
     Light(const string& name) : name(name){}
 
     virtual LightType type() const = 0;
+    virtual bool CanAffect(const Sphere& bounds) const = 0;
     virtual Color Apply(const Vec3& surfPos, const Vec3& surfNorm, const Vec3& eyePos, const Vec3& eyeDir) const = 0;
+    virtual void Update() = 0;
 };
 
 class AmbientLight : public Light
@@ -43,10 +45,16 @@ public:
         return LightType::Ambient;
     }
 
+    virtual bool CanAffect(const Sphere& bounds) const {
+        return true;
+    }
+
     virtual Color Apply(const Vec3& surfPos, const Vec3& surfNorm, const Vec3& eyePos, const Vec3& eyeDir) const override
     {
         return color * intensity;
     }
+
+    virtual void Update() override{}
 };
 
 class DirectionalLight : public Light
@@ -70,6 +78,10 @@ public:
         return LightType::Directional;
     }
 
+    virtual bool CanAffect(const Sphere& bounds) const {
+        return true;
+    }
+
     virtual Color Apply(const Vec3& surfPos, const Vec3& surfNorm, const Vec3& eyePos, const Vec3& eyeDir) const override
     {
         float cn = surfNorm.Dot(-direction);
@@ -78,6 +90,8 @@ public:
 
         return color * cn * intensity;
     }
+
+    virtual void Update() override{}
 };
 
 class PointLight : public Light
@@ -107,6 +121,12 @@ public:
         return LightType::Point;
     }
 
+    virtual bool CanAffect(const Sphere& bounds) const {
+        float r = distAttenMax + bounds.radius;
+        float distSq = position.DistanceSq(bounds.center);
+        return distSq < r * r;
+    }
+
     virtual Color Apply(const Vec3& surfPos, const Vec3& surfNorm, const Vec3& eyePos, const Vec3& eyeDir) const override
     {
         Vec3 lightVec = surfPos - position;
@@ -127,10 +147,14 @@ public:
 
         return color * cd * cn * intensity;
     }
+
+    virtual void Update() override{}
 };
 
 class SpotLight : public Light
 {
+    // near, far, left, right, top, bottom
+    Plane _frustum[6]{};
 public:
     Color color = Color::white;
     float intensity = 1.0f;
@@ -165,6 +189,17 @@ public:
         return LightType::Spot;
     }
 
+    virtual bool CanAffect(const Sphere& bounds) const
+    {
+        for(int i = 0; i < 6; ++i)
+        {
+            if(_frustum[i].Distance(bounds.center) < -bounds.radius)
+                return false;
+        }
+
+        return true;
+    }
+
     virtual Color Apply(const Vec3& surfPos, const Vec3& surfNorm, const Vec3& eyePos, const Vec3& eyeDir) const override
     {
         Vec3 lightVec = surfPos - position;
@@ -184,7 +219,7 @@ public:
         float h_angAttenMinRad = Math::DegToRad * angAttenMin * 0.5f;
         float h_angAttenMaxRad = Math::DegToRad * angAttenMax * 0.5f;
 
-        float ang = Math::Acos(max(direction.Dot(lightDir), 0.0f));
+        float ang = direction.MaxAcuteAngle(lightDir);
         if(ang > h_angAttenMaxRad)
             return Color::clear;
 
@@ -195,5 +230,24 @@ public:
         cd = (1.0f - cd * cd);
 
         return color * ca * cd * cn * intensity;
+    }
+
+    virtual void Update() override
+    {
+        float hAng = angAttenMax * 0.5f;
+        Quat hRot = Quat::AngleAxis(hAng, Vec3::up);
+        Quat vRot = Quat::AngleAxis(hAng, direction.Cross(Vec3::up));
+
+        Vec3 ln = direction * hRot;
+        Vec3 rn = direction * hRot.Inverse();
+        Vec3 tn = direction * vRot;
+        Vec3 bn = direction * vRot.Inverse();
+
+        _frustum[0] = Plane(direction, position);
+        _frustum[1] = Plane(-direction, position + direction * distAttenMax);
+        _frustum[2] = Plane(ln, position);
+        _frustum[3] = Plane(rn, position);
+        _frustum[4] = Plane(tn, position);
+        _frustum[5] = Plane(bn, position);
     }
 };

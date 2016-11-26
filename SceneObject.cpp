@@ -8,13 +8,14 @@
 SceneObject::SceneObject(const string& name,
                          const shared_ptr<Model>& model,
                          const shared_ptr<Texture>& texture,
-                         const shared_ptr<Shader>& shader)
+                         const shared_ptr<Shader>& shader,
+                         CullMode cullMode)
 {
     this->name = name;
     this->model = model;
     this->texture = texture;
     this->shader = shader;
-    this->backfaceCullingEnabled = true;
+    this->cullMode = cullMode;
 }
 
 Sphere SceneObject::GetWorldBoundingSphere()
@@ -22,6 +23,6 @@ Sphere SceneObject::GetWorldBoundingSphere()
     Sphere ret;
     const Vec3 scale = transform.GetScale();
     ret.center = Vec4(model->bsphere.center, 1) * transform.GetMatrix();
-    ret.radius = max(scale.x, max(scale.y, scale.z)) * model->bsphere.radius;
+    ret.radius = Math::Max(scale.x, scale.y, scale.z) * model->bsphere.radius;
     return ret;
 }

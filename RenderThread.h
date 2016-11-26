@@ -47,7 +47,6 @@ class RenderThread
     Task _task;
     mutable condition_variable_any _task_cv;
     mutable condition_variable_any _busy_cv;
-    //mutable mutex _mut;
     mutable spinlock _spn;
     volatile bool _run = true;
     volatile bool _busy = false;
@@ -116,19 +115,11 @@ private:
                     Rect rect = task.rect;
                     auto& cverts = context->_cverts;
 
-                    switch(context->_rasterizationMode)
-                    {
-                    default:
-                    case RasterizationMode::Scanline:
-                        for(size_t i = drawCall.start; i < drawCall.end; i += 3)
-                            context->RasterizeScanline(rect, cverts[i], cverts[i + 1], cverts[i + 2], &drawCall);
-                        break;
-                    case RasterizationMode::Halfspace:
-                        for(size_t i = drawCall.start; i < drawCall.end; i += 3)
-                            context->RasterizeHalfSpace(rect, cverts[i], cverts[i + 1], cverts[i + 2], &drawCall);
-                        break;
-                    }
+                    for(size_t i = drawCall.start; i < drawCall.end; i += 3)
+                        context->Rasterize(rect, cverts[i], cverts[i + 1], cverts[i + 2], &drawCall);
                 }
+
+                context->Resolve(task.rect);
             }
         }
     }

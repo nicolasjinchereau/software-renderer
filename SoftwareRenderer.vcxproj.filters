@@ -67,6 +67,18 @@
     <ClInclude Include="Json.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="OutputDebugStringBuf.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderBuffer.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="static_vector.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="poly_vector.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Camera.cpp">
@@ -106,6 +118,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Json.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OutputDebugStringBuf.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

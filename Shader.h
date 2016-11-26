@@ -4,40 +4,22 @@
 *--------------------------------------------------------------------------------------------*/
 
 #pragma once
-#include "RenderingContext.h"
 #include <cassert>
+#include "poly_vector.h"
 
+class Shader;
 class Scene;
 class SceneObject;
 class Vertex;
-class ShaderVisitor;
+
+typedef poly_vector<Shader, AlignedAllocator<uint8_t, 16>> ShaderList;
 
 class alignas(16) Shader
 {
 public:
     virtual ~Shader(){}
-    virtual void Accept(ShaderVisitor* visitor) = 0;
+    virtual void CopyTo(ShaderList& copies) = 0;
     virtual void Prepare(Scene* scene, SceneObject* obj) = 0;
     virtual Vertex ProcessVertex(const Vertex &in) = 0;
     virtual Color ProcessPixel(const Vertex &in, float mipLevel, bool& discard) = 0;
-};
-
-class ShaderVisitor final
-{
-    vector<uint8_t, AlignedAllocator<uint8_t, 16>>* pInstanceData;
-public:
-    ShaderVisitor(vector<uint8_t, AlignedAllocator<uint8_t, 16>>* pInstanceData)
-        : pInstanceData(pInstanceData)
-    {
-        assert(pInstanceData);
-    }
-
-    template<class T>
-    void Visit(T* shader)
-    {
-        assert(shader);
-        size_t size = pInstanceData->size();
-        pInstanceData->resize(size + sizeof(T));
-        new (pInstanceData->data() + size) T(*shader);
-    }
 };

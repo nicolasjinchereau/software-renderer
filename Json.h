@@ -32,126 +32,248 @@ typedef long long                                  JSONInteger;
 typedef double                                     JSONFloat;
 typedef bool                                       JSONBoolean;
 
+template<class T> inline JSONType JSONGetType();
+template<> inline JSONType JSONGetType<JSONNull>()    { return JSONType::Null; }
+template<> inline JSONType JSONGetType<JSONObject>()  { return JSONType::Object; }
+template<> inline JSONType JSONGetType<JSONArray>()   { return JSONType::Array; }
+template<> inline JSONType JSONGetType<JSONString>()  { return JSONType::String; }
+template<> inline JSONType JSONGetType<JSONInteger>() { return JSONType::Integer; }
+template<> inline JSONType JSONGetType<JSONFloat>()   { return JSONType::Float; }
+template<> inline JSONType JSONGetType<JSONBoolean>() { return JSONType::Boolean; }
+
 class JSONValue
 {
-    union Payload {
-        JSONObject  _object;
-        JSONArray   _array;
-        JSONString  _string;
-        JSONInteger _integer;
-        JSONFloat   _float;
-        JSONBoolean _boolean;
+    struct PayloadBase
+    {
+        PayloadBase(){}
+        virtual ~PayloadBase(){}
+        virtual PayloadBase* MoveConstruct(void* addr) const = 0;
+        virtual PayloadBase* CopyConstruct(void* addr) const = 0;
+        virtual JSONType GetType() const = 0;
+        virtual void* GetAddress(JSONType expectedType) = 0;
+        virtual std::string ToString() const = 0;
 
-        Payload(){}
-        ~Payload(){}
+        template<class T> T& GetValue() {
+            return *(T*)GetAddress(JSONGetType<T>());
+        }
+
+        template<class T> const T& GetValue() const {
+            return *(const T*)((PayloadBase*)this)->GetAddress(JSONGetType<T>());
+        }
     };
 
-    JSONType type = JSONType::Null;
-    Payload payload;
+    template<class T>
+    struct Payload : public PayloadBase
+    {
+        T obj;
+        
+        template<typename... Ts>
+        Payload(Ts&&... ts) : obj(std::forward<Ts>(ts)...){}
 
-    void CopyFrom(const JSONValue& x);
-    void ConstructFrom(JSONValue&& x);
-    void Clear();
+        virtual PayloadBase* MoveConstruct(void* addr) const {
+            return new (addr) Payload<T>(std::move(obj));
+        }
+        
+        virtual PayloadBase* CopyConstruct(void* addr) const {
+            return new (addr) Payload<T>(obj);
+        }
 
-    void ThrowIfNotType(JSONType type) const;
+        virtual JSONType GetType() const {
+            return JSONGetType<T>();
+        }
+
+        virtual void* GetAddress(JSONType expectedType)
+        {
+            if(JSONGetType<T>() != expectedType)
+                throw JSONException("The contained object is not of type '"s + TypeToString(expectedType) + "'");
+
+            return (void*)&obj;
+        }
+
+        template<class T> std::string _toString() const;
+        template<> std::string _toString<JSONNull>() const { return "null"; }
+        template<> std::string _toString<JSONObject>() const { return "Object"; }
+        template<> std::string _toString<JSONArray>() const { return "Array"; }
+        template<> std::string _toString<JSONString>() const { return obj; }
+        template<> std::string _toString<JSONInteger>() const { return to_string(obj); }
+        template<> std::string _toString<JSONFloat>() const {
+            char buff[3 + DBL_MANT_DIG - DBL_MIN_EXP];
+            sprintf_s(buff, "%g", obj);
+            return buff;
+        }
+        template<> std::string _toString<JSONBoolean>() const { return obj ? "true" : "false"; }
+
+        virtual std::string ToString() const {
+            return _toString<T>();
+        }
+    };
+
+    union PayloadData {
+        Payload<JSONObject>  _object;
+        Payload<JSONArray>   _array;
+        Payload<JSONString>  _string;
+        Payload<JSONInteger> _integer;
+        Payload<JSONFloat>   _float;
+        Payload<JSONBoolean> _boolean;
+        PayloadData(){}
+        ~PayloadData(){}
+    };
+
+    PayloadData _payload;
+    PayloadBase& payload() { return *(PayloadBase*)&_payload; }
+    const PayloadBase& payload() const { return *(PayloadBase*)&_payload; }
+
+    template<class T, class U>
+    void _construct(U&& x) {
+        new (&_payload) Payload<T>(std::forward<U>(x));
+    }
+
+    void _destroy() {
+        ((PayloadBase*)&_payload)->~PayloadBase();
+    }
+
+    void _copyFrom(const JSONValue& x) {
+        x.payload().CopyConstruct(&_payload);
+    }
+
+    void _moveFrom(JSONValue&& x) {
+        x.payload().MoveConstruct(&_payload);
+    }
+
     static std::string TypeToString(JSONType type);
+    
 public:
-    JSONValue(){}
-    JSONValue(JSONValue&& x);
-    JSONValue(const JSONValue& x);
-    JSONValue(nullptr_t);
-    JSONValue(const JSONObject& x);
-    JSONValue(JSONObject&& x);
-    JSONValue(const JSONArray& x);
-    JSONValue(JSONArray&& x);
-    JSONValue(const std::string& x);
-    JSONValue(std::string&& x);
-    JSONValue(const char* x);
-    JSONValue(int x);
-    JSONValue(long long x);
-    JSONValue(double x);
-    JSONValue(bool x);
-    ~JSONValue();
+
+    JSONValue() {
+        _construct<JSONNull>(nullptr);
+    }
+
+    JSONValue::JSONValue(JSONValue&& x) {
+        _moveFrom(std::move(x));
+    }
+
+    JSONValue(const JSONValue& x) {
+        _copyFrom(x);
+    }
+
+    JSONValue(nullptr_t) {
+        _construct<JSONNull>(nullptr);
+    }
+
+    JSONValue(const JSONObject& x) {
+        _construct<JSONObject>(x);
+    }
+
+    JSONValue(JSONObject&& x) {
+        _construct<JSONObject>(std::move(x));
+    }
+
+    JSONValue(const JSONArray& x) {
+        _construct<JSONArray>(x);
+    }
+
+    JSONValue(JSONArray&& x) {
+        _construct<JSONArray>(std::move(x));
+    }
+
+    JSONValue(const std::string& x) {
+        _construct<JSONString>(x);
+    }
+
+    JSONValue(std::string&& x) {
+        _construct<JSONString>(std::move(x));
+    }
+
+    JSONValue(const char* x) {
+        _construct<JSONString>(x);
+    }
+
+    JSONValue(int x) {
+        _construct<JSONInteger>(x);
+    }
+
+    JSONValue(long long x) {
+        _construct<JSONInteger>(x);
+    }
+
+    JSONValue(double x) {
+        _construct<JSONFloat>(x);
+    }
+
+    JSONValue(bool x) {
+        _construct<JSONBoolean>(x);
+    }
+
+    ~JSONValue() {
+        _destroy();
+    }
 
     JSONValue& operator=(const JSONValue& x) {
-        CopyFrom(x);
+        _destroy();
+        _copyFrom(x);
         return *this;
     };
 
     JSONValue& operator=(JSONValue&& x) {
-        Clear();
-        ConstructFrom(std::forward<JSONValue>(x));
+        _destroy();
+        _moveFrom(std::forward<JSONValue>(x));
         return *this;
     };
     
     operator JSONObject&() {
-        ThrowIfNotType(JSONType::Object);
-        return payload._object;
+        return payload().GetValue<JSONObject>();
     }
 
     operator JSONArray&() {
-        ThrowIfNotType(JSONType::Array);
-        return payload._array;
+        return payload().GetValue<JSONArray>();
     }
 
-    operator std::string() {
-        ThrowIfNotType(JSONType::String);
-        return payload._string;
+    operator JSONString() {
+        return payload().GetValue<JSONString>();
     }
 
     operator int() {
-        ThrowIfNotType(JSONType::Integer);
-        return (int)payload._integer;
+        return (int)payload().GetValue<JSONInteger>();
     }
 
     operator long long() {
-        ThrowIfNotType(JSONType::Integer);
-        return payload._integer;
+        return payload().GetValue<JSONInteger>();
     }
-
+    
     operator float() {
-        ThrowIfNotType(JSONType::Float);
-        return (float)payload._float;
+        return (float)payload().GetValue<JSONFloat>();
     }
 
     operator double() {
-        ThrowIfNotType(JSONType::Float);
-        return payload._float;
+        return payload().GetValue<JSONFloat>();
     }
 
     operator bool() {
-        ThrowIfNotType(JSONType::Boolean);
-        return payload._boolean;
+        return payload().GetValue<JSONBoolean>();
     }
 
     JSONObject& asObject() {
-        ThrowIfNotType(JSONType::Object);
-        return payload._object;
+        return payload().GetValue<JSONObject>();
     }
 
     JSONArray& asArray() {
-        ThrowIfNotType(JSONType::Array);
-        return payload._array;
+        return payload().GetValue<JSONArray>();
     }
 
-    std::string& asString() {
-        ThrowIfNotType(JSONType::String);
-        return payload._string;
+    JSONString& asString() {
+        return payload().GetValue<JSONString>();
     }
 
     long long& asInteger() {
-        ThrowIfNotType(JSONType::Integer);
-        return payload._integer;
+        return payload().GetValue<JSONInteger>();
     }
 
     double& asFloat() {
-        ThrowIfNotType(JSONType::Float);
-        return payload._float;
+        return payload().GetValue<JSONFloat>();
     }
 
     bool& asBoolean() {
-        ThrowIfNotType(JSONType::Boolean);
-        return payload._boolean;
+        return payload().GetValue<JSONBoolean>();
     }
 
     const JSONObject& asObject() const {
@@ -179,8 +301,7 @@ public:
     }
 
     JSONValue& operator[](const char* key) {
-        ThrowIfNotType(JSONType::Object);
-        auto it = payload._object.emplace(key, JSONValue());
+        auto it = payload().GetValue<JSONObject>().emplace(key, JSONValue());
         return it.first->second;
     }
 
@@ -189,29 +310,28 @@ public:
     }
 
     JSONValue& operator[](int index) {
-        ThrowIfNotType(JSONType::Array);
-        return payload._array[index];
+        return payload().GetValue<JSONArray>()[index];
     }
 
     const JSONValue& operator[](int index) const {
-        return (*(JSONValue*)this)[index];
+        return payload().GetValue<JSONArray>()[index];
     }
 
     void Append(const JSONValue& x) {
-        ThrowIfNotType(JSONType::Array);
-        payload._array.push_back(x);
+        return payload().GetValue<JSONArray>().push_back(x);
     }
 
     void Append(JSONValue&& x) {
-        ThrowIfNotType(JSONType::Array);
-        payload._array.push_back(std::forward<JSONValue>(x));
+        return payload().GetValue<JSONArray>().push_back(std::move(x));
     }
 
     JSONType valueType() const {
-        return type;
+        return payload().GetType();
     }
 
-    std::string ToString() const;
+    std::string ToString() const {
+        return payload().ToString();
+    }
 
     friend std::ostream& operator<<(std::ostream& os, const JSONValue& obj) {
         os << obj.ToString();

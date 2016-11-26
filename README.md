@@ -8,6 +8,7 @@ A software renderer created for educational purposes.
 * Texture filtering (point, bilinear, trilinear)
 * Customizable shaders
 * Per-pixel lighting (ambient, directional, point, spot)
+* Antialiasing (2X/4X SSAA, 4X MSAA)
 * SIMD optimizations
 * Multithread rendering
 * No external dependancies except FBX SDK
@@ -22,11 +23,11 @@ A software renderer created for educational purposes.
 * Multithread rendering enabled
 * 640x480 resolution
 * i7 3820QM (2.7-3.7 GHz)
-* 60 FPS Average
+* 60+ FPS
 
 ## Build
 * VS2015+
-* CPU with SSE2+
+* SSE4+
 
 ## Controls
 Key | Action
@@ -38,10 +39,9 @@ D | right
 Q | up
 E | down
 Left-click | mouse look
-P | use point texture filtering
-B | use bilinear texture filtering
-T | use trilinear texture filtering
+T | cycle tex filter (point, bilinear, trilinear)
 M | toggle mipmaps
 L | toggle lighting
+F | cycle antialiasing (None, 4x MSAA, 2x SSAA, 4x SSAA)
 C | toggle framerate cap
 R | reload scene_settings.json

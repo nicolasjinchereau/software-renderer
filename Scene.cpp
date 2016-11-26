@@ -41,6 +41,7 @@ void Scene::ApplySettings(const string& filename)
 
                     light->color = Color(color[0], color[1], color[2], color[3]);
                     light->intensity = multiplier;
+                    light->Update();
                 }
                 else if(type == LightType::Directional)
                 {
@@ -53,6 +54,7 @@ void Scene::ApplySettings(const string& filename)
                     light->color = Color(color[0], color[1], color[2], color[3]);
                     light->intensity = multiplier;
                     light->direction = Vec3(dir[0], dir[1], dir[2]);
+                    light->Update();
                 }
                 else if(type == LightType::Point)
                 {
@@ -69,6 +71,7 @@ void Scene::ApplySettings(const string& filename)
                     light->position = Vec3(pos[0], pos[1], pos[2]);
                     light->distAttenMin = distAttenMin;
                     light->distAttenMax = distAttenMax;
+                    light->Update();
                 }
                 else if(type == LightType::Spot)
                 {
@@ -91,6 +94,7 @@ void Scene::ApplySettings(const string& filename)
                     light->angAttenMax = angAttenMax;
                     light->distAttenMin = distAttenMin;
                     light->distAttenMax = distAttenMax;
+                    light->Update();
                 }
             }
         }

@@ -13,6 +13,7 @@
 #include "Light.h"
 #include <memory>
 #include <vector>
+#include "static_vector.h"
 
 // a pixel lit shader used for rendering all models
 class LitShader : public Shader
@@ -26,9 +27,10 @@ public:
     Vec3 eyePos = Vec3::zero;
     Vec3 eyeDir = Vec3::zero;
     bool enableLighting = true;
-    
-    virtual void Accept(ShaderVisitor* visitor) override {
-        visitor->Visit(this);
+    static_vector<Light*, 5> lights;
+
+    virtual void CopyTo(ShaderList& copies) override {
+        copies.push_back(*this);
     }
 
     virtual void Prepare(Scene* scene, SceneObject* obj) override
@@ -41,6 +43,15 @@ public:
         eyePos = scene->camera->transform.GetPosition();
         eyeDir = Vec3::forward * scene->camera->transform.GetRotation();
         int channels = texture->channels();
+
+        lights.clear();
+
+        for(auto& light : scene->lights)
+        {
+            if(light->CanAffect(obj->GetWorldBoundingSphere())) {
+                lights.push_back(light.get());
+            }
+        }
     }
 
     virtual Vertex ProcessVertex(const Vertex &in) override
@@ -65,7 +76,7 @@ public:
             Color lum = Color::black;
             Vec3 normal = in.normal.Normalized();
 
-            for(auto& light : scene->lights)
+            for(auto& light : lights)
                 lum += light->Apply(in.worldPos, normal, eyePos, eyeDir);
 
             return tex * lum;
@@ -79,9 +90,10 @@ public:
 
 class LitCutoutShader : public LitShader
 {
-public: 
-    virtual void Accept(ShaderVisitor* visitor) override {
-        visitor->Visit(this);
+public:
+
+    virtual void CopyTo(ShaderList& copies) override {
+        copies.push_back(*this);
     }
 
     virtual Color ProcessPixel(const Vertex &in, float mipLevel, bool& discard) override
@@ -98,7 +110,7 @@ public:
             Color lum = Color::black;
             Vec3 normal = in.normal.Normalized();
 
-            for(auto& light : scene->lights)
+            for(auto& light : lights)
                 lum += light->Apply(in.worldPos, normal, eyePos, eyeDir);
 
             return tex * lum;
@@ -117,8 +129,8 @@ public:
     Texture* texture;
     Mat4 mtxMVP;
 
-    virtual void Accept(ShaderVisitor* visitor) override {
-        visitor->Visit(this);
+    virtual void CopyTo(ShaderList& copies) override {
+        copies.push_back(*this);
     }
 
     virtual void Prepare(Scene* scene, SceneObject* obj) override

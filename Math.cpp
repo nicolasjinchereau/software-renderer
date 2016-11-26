@@ -4,7 +4,6 @@
 *--------------------------------------------------------------------------------------------*/
 
 #include "Math.h"
-#include "SIMD.h"
 #include <algorithm>
 #include <cassert>
 using namespace Math;
@@ -30,11 +29,11 @@ Vec2 Vec2::operator-(const Vec2& v) const {
     return Vec2(x - v.x, y - v.y);
 }
 
-Vec2 Vec2::operator*(const float s) const {
+Vec2 Vec2::operator*(float s) const {
     return Vec2(x * s, y * s);
 }
 
-Vec2 Vec2::operator/(const float s) const {
+Vec2 Vec2::operator/(float s) const {
     return Vec2(x / s, y / s);
 }
 
@@ -56,14 +55,14 @@ Vec2& Vec2::operator-=(const Vec2& v)
     return *this;
 }
 
-Vec2& Vec2::operator*=(const float s)
+Vec2& Vec2::operator*=(float s)
 {
     x *= s;
     y *= s;
     return *this;
 }
 
-Vec2& Vec2::operator/=(const float s)
+Vec2& Vec2::operator/=(float s)
 {
     x /= s;
     y /= s;
@@ -134,6 +133,11 @@ bool Vec2::IsNormalized() const
     return abs(1.0f - sqLen) <= FloatTolerance;
 }
 
+std::ostream& operator<<(std::ostream& os, const Vec2& v) {
+    os << "(" << v.x << ", " << v.y << ")";
+    return os;
+}
+
 ////////////////////////////////
 //    Vec3
 ////////////////////////////////
@@ -143,28 +147,53 @@ const Vec3 Vec3::forward(0, 0, 1);
 const Vec3 Vec3::up(0, 1, 0);
 const Vec3 Vec3::right(1, 0, 0);
 
-Vec3 Vec3::operator-() const {
+Vec3 Vec3::operator-() const
+{
+#if USE_SSE
+    return _mm_xor_ps(m, _mm_set_ps1(-0.0f));
+#else
     return Vec3(-x, -y, -z);
+#endif
 }
 
-Vec3 Vec3::operator+(const Vec3& v) const {
+Vec3 Vec3::operator+(const Vec3& v) const
+{
+#if USE_SSE
+    return _mm_add_ps(m, v.m);
+#else
     return Vec3(x + v.x, y + v.y, z + v.z);
+#endif
 }
 
-Vec3 Vec3::operator-(const Vec3& v) const {
+Vec3 Vec3::operator-(const Vec3& v) const
+{
+#if USE_SSE
+    return _mm_sub_ps(m, v.m);
+#else
     return Vec3(x - v.x, y - v.y, z - v.z);
+#endif
 }
 
-Vec3 Vec3::operator*(float s) const {
+Vec3 Vec3::operator*(float s) const
+{
+#if USE_SSE
+    return _mm_mul_ps(m, _mm_set_ps1(s));
+#else
     return Vec3(x * s, y * s, z * s);
+#endif
 }
 
-Vec3 Vec3::operator/(float s) const {
+Vec3 Vec3::operator/(float s) const
+{
+#if USE_SSE
+    return _mm_div_ps(m, _mm_set_ps1(s));
+#else
     return Vec3(x / s, y / s, z / s);
+#endif
 }
 
 float Vec3::operator*(const Vec3& v) const {
-    return (x * v.x) + (y * v.y) + (z * v.z);
+    return Dot(v);
 }
 
 Vec3 Vec3::operator*(const Quat& q) const
@@ -184,31 +213,51 @@ Vec3 Vec3::operator*(const Mat3& m) const
         x * m.m13 + y * m.m23 + z * m.m33);
 }
 
-Vec3& Vec3::operator+=(const Vec3& v) {
+Vec3& Vec3::operator+=(const Vec3& v)
+{
+#if USE_SSE
+    m = _mm_add_ps(m, v.m);
+#else
     x += v.x;
     y += v.y;
     z += v.z;
+#endif
     return *this;
 }
 
-Vec3& Vec3::operator-=(const Vec3& v) {
+Vec3& Vec3::operator-=(const Vec3& v)
+{
+#if USE_SSE
+    m = _mm_sub_ps(m, v.m);
+#else
     x -= v.x;
     y -= v.y;
     z -= v.z;
+#endif
     return *this;
 }
 
-Vec3& Vec3::operator*=(float s) {
+Vec3& Vec3::operator*=(float s)
+{
+#if USE_SSE
+    m = _mm_mul_ps(m, _mm_set_ps1(s));
+#else
     x *= s;
     y *= s;
     z *= s;
+#endif
     return *this;
 }
 
-Vec3& Vec3::operator/=(float s) {
+Vec3& Vec3::operator/=(float s)
+{
+#if USE_SSE
+    m = _mm_div_ps(m, _mm_set_ps1(s));
+#else
     x /= s;
     y /= s;
     z /= s;
+#endif
     return *this;
 }
 
@@ -220,61 +269,149 @@ Vec3& Vec3::operator*=(const Mat3& m) {
     return *this = *this * m;
 }
 
-bool Vec3::operator==(const Vec3& v) const {
+bool Vec3::operator==(const Vec3& v) const
+{
+#if USE_SSE
+    return _mm_movemask_ps(_mm_cmpeq_ps(m, v.m)) == 0xF;
+#else
     return (x == v.x && y == v.y && z == v.z);
+#endif
 }
 
-bool Vec3::operator!=(const Vec3& v) const {
+bool Vec3::operator!=(const Vec3& v) const
+{
+#if USE_SSE
+    return _mm_movemask_ps(_mm_cmpeq_ps(m, v.m)) != 0xF;
+#else
     return (x != v.x || y != v.y || z != v.z);
+#endif
 }
 
-Vec3 Vec3::Scale(const Vec3& v) const {
+Vec3 Vec3::Scale(const Vec3& v) const
+{
+#if USE_SSE
+    return _mm_mul_ps(m, v.m);
+#else
     return Vec3(x * v.x, y * v.y, z * v.z);
+#endif
 }
 
-float Vec3::Dot(const Vec3 & v) const {
+float Vec3::Dot(const Vec3 & v) const
+{
+#if USE_SSE
+    return _mm_cvtss_f32(_mm_dp_ps(m, v.m, 0b01110001));
+#else
     return x * v.x + y * v.y + z * v.z;
+#endif
 }
 
-float Vec3::Dot(const Plane& p) const {
+float Vec3::Dot(const Plane& p) const
+{
+#if USE_SSE
+    __m128 r = _mm_insert_ps(m, _mm_set_ss(1), _MM_MK_INSERTPS_NDX(0, 3, 0));
+    return _mm_cvtss_f32(_mm_dp_ps(r, p.m, 0b11110001));
+#else
     return x * p.a + y * p.b + z * p.c + p.d;
+#endif
 }
 
 Vec3 Vec3::Cross(const Vec3 & v) const
 {
+#if USE_SSE
+    __m128 a = _mm_shuffle_ps(m, m, _MM_SHUFFLE(3, 0, 2, 1));
+    __m128 b = _mm_shuffle_ps(v.m, v.m, _MM_SHUFFLE(3, 1, 0, 2));
+    __m128 lt = _mm_mul_ps(a, b);
+    a = _mm_shuffle_ps(a, a, _MM_SHUFFLE(3, 0, 2, 1));
+    b = _mm_shuffle_ps(b, b, _MM_SHUFFLE(3, 1, 0, 2));
+    return _mm_sub_ps(lt, _mm_mul_ps(a, b));
+#else
     return Vec3((y * v.z) - (z * v.y),
                 (z * v.x) - (x * v.z),
                 (x * v.y) - (y * v.x));
+#endif
 }
 
-float Vec3::Length() const {
+float Vec3::Angle(const Vec3& v) const
+{
+#if USE_SSE
+    __m128 r = _mm_dp_ps(m, v.m, 0b01110001);
+    __m128 rr = _mm_mul_ss(r, r);
+    rr = _mm_mul_ss(rr, _mm_set_ss(-0.6981316805f));
+    rr = _mm_sub_ss(rr, _mm_set_ss(0.8726646304f));
+    r = _mm_mul_ss(rr, r);
+    r = _mm_add_ss(r, _mm_set_ss(1.570796371f));
+    return _mm_cvtss_f32(r);
+#else
+    return Math::Acos(Dot(v));
+#endif
+}
+
+float Vec3::MaxAcuteAngle(const Vec3& v) const
+{
+#if USE_SSE
+    __m128 r = _mm_dp_ps(m, v.m, 0b01110001);
+    r = _mm_max_ss(r, _mm_set_ss(0));
+    __m128 rr = _mm_mul_ss(r, r);
+    rr = _mm_mul_ss(rr, _mm_set_ss(-0.6981316805f));
+    rr = _mm_sub_ss(rr, _mm_set_ss(0.8726646304f));
+    r = _mm_mul_ss(rr, r);
+    r = _mm_add_ss(r, _mm_set_ss(1.570796371f));
+    return _mm_cvtss_f32(r);
+#else
+    return Math::Acos(max(Dot(v), 0.0f));
+#endif
+}
+
+float Vec3::Length() const
+{
+#if USE_SSE
+    __m128 r = _mm_dp_ps(m, m, 0b01110001);
+    __m128 c = _mm_cmpgt_ss(r, _mm_set_ss(1e-05f));
+    r = _mm_and_ps(_mm_sqrt_ss(r), c);
+    return _mm_cvtss_f32(r);
+#else
     return sqrt(x * x + y * y + z * z);
+#endif
 }
 
 float Vec3::LengthSq() const {
-    return x * x + y * y + z * z;
+    return Dot(*this);
 }
 
 float Vec3::Distance(const Vec3& v) const {
-    return Vec3(v.x - x, v.y - y, v.z - z).Length();
+    return (v - *this).Length();
 }
 
 float Vec3::DistanceSq(const Vec3& v) const {
-    return Vec3(v.x - x, v.y - y, v.z - z).LengthSq();
+    return (v - *this).LengthSq();
 }
 
 void Vec3::Normalize()
 {
+#if USE_SSE
+    __m128 r = _mm_dp_ps(m, m, 0b01110001);
+    __m128 c = _mm_cmpgt_ss(r, _mm_set_ss(1e-05f));
+    r = _mm_and_ps(_mm_rsqrt_ss(r), c);
+    m = _mm_mul_ps(m, _mm_shuffle_ps(r, r, 0));
+#else
     float sqLen = x * x + y * y + z * z;
     if(sqLen >= FloatTolerance && abs(1.0f - sqLen) > FloatTolerance)
         *this /= sqrt(sqLen);
+#endif
 }
 
 Vec3 Vec3::Normalized() const
 {
+#if USE_SSE
+    __m128 r = _mm_dp_ps(m, m, 0b01110001);
+    __m128 c = _mm_cmpgt_ss(r, _mm_set_ss(1e-05f));
+    r = _mm_and_ps(_mm_rsqrt_ss(r), c);
+    return _mm_mul_ps(m, _mm_shuffle_ps(r, r, 0));
+#else
     float sqLen = x * x + y * y + z * z;
     return sqLen >= FloatTolerance && abs(1.0f - sqLen) > FloatTolerance ?
         *this / sqrt(sqLen) : *this;
+#endif
 }
 
 bool Vec3::IsNormalized() const {
@@ -296,16 +433,19 @@ const Vec4 Vec4::forward(0, 0, 1, 0);
 const Vec4 Vec4::up(0, 1, 0, 0);
 const Vec4 Vec4::right(1, 0, 0, 0);
 
-Vec4 Vec4::operator-() const {
+Vec4 Vec4::operator-() const
+{
+#if USE_SSE
+    return _mm_xor_ps(m, _mm_set_ps1(-0.0f));
+#else
     return Vec4(-x, -y, -z, -w);
+#endif
 }
 
 Vec4 Vec4::operator+(const Vec4& v) const
 {
 #if USE_SSE
-    Vec4 ret;
-    vadd(&x, &v.x, &ret.x);
-    return ret;
+    return _mm_add_ps(m, v.m);
 #else
     return Vec4(x + v.x, y + v.y, z + v.z, w + v.w);
 #endif
@@ -314,46 +454,46 @@ Vec4 Vec4::operator+(const Vec4& v) const
 Vec4 Vec4::operator-(const Vec4& v) const
 {
 #if USE_SSE
-    Vec4 ret;
-    vsub(&x, &v.x, &ret.x);
-    return ret;
+     return _mm_sub_ps(m, v.m);
 #else
     return Vec4(x - v.x, y - v.y, z - v.z, w - v.w);
 #endif
 }
 
-Vec4 Vec4::operator*(const float s) const
+Vec4 Vec4::operator*(float s) const
 {
 #if USE_SSE
-    Vec4 ret;
-    vmul(&x, s, &ret.x);
-    return ret;
+    return _mm_mul_ps(m, _mm_set_ps1(s));
 #else
     return Vec4(x * s, y * s, z * s, w * s);
 #endif
 }
 
-Vec4 Vec4::operator/(const float s) const
+Vec4 Vec4::operator/(float s) const
 {
 #if USE_SSE
-    Vec4 ret;
-    vdiv(&x, s, &ret.x);
-    return ret;
+    return _mm_div_ps(m, _mm_set_ps1(s));
 #else
     return Vec4(x / s, y / s, z / s, w / s);
 #endif
 }
 
 float Vec4::operator*(const Vec4& v) const {
-    return x * v.x + y * v.y + z * v.z + w * v.w;
+    return Dot(v);
 }
 
 Vec4 Vec4::operator*(const Mat4& m) const
 {
 #if USE_SSE
-	Vec4 ret;
-    vmulm(&x, &m.m11, &ret.x);
-	return ret;
+    __m128 cv1 = _mm_shuffle_ps(this->m, this->m, 0b00000000);
+	__m128 cv2 = _mm_shuffle_ps(this->m, this->m, 0b01010101);
+	__m128 cv3 = _mm_shuffle_ps(this->m, this->m, 0b10101010);
+	__m128 cv4 = _mm_shuffle_ps(this->m, this->m, 0b11111111);
+	__m128 a = _mm_mul_ps(cv1, m.mm[0]);
+	__m128 b = _mm_mul_ps(cv2, m.mm[1]);
+	__m128 c = _mm_mul_ps(cv3, m.mm[2]);
+	__m128 d = _mm_mul_ps(cv4, m.mm[3]);
+    return _mm_add_ps(_mm_add_ps(a, b), _mm_add_ps(c, d));
 #else
     return Vec4(
         m.m11 * x + m.m21 * y + m.m31 * z + m.m41 * w,
@@ -366,7 +506,7 @@ Vec4 Vec4::operator*(const Mat4& m) const
 Vec4& Vec4::operator+=(const Vec4& v)
 {
 #if USE_SSE
-    vadd(&x, &v.x, &x);
+    m = _mm_add_ps(m, v.m);
 #else
     x += v.x;
     y += v.y;
@@ -379,7 +519,7 @@ Vec4& Vec4::operator+=(const Vec4& v)
 Vec4& Vec4::operator-=(const Vec4& v)
 {
 #if USE_SSE
-    vsub(&x, &v.x, &x);
+    m = _mm_sub_ps(m, v.m);
 #else
     x -= v.x;
     y -= v.y;
@@ -389,10 +529,10 @@ Vec4& Vec4::operator-=(const Vec4& v)
     return *this;
 }
 
-Vec4& Vec4::operator*=(const float s)
+Vec4& Vec4::operator*=(float s)
 {
 #if USE_SSE
-    vmul(&x, s, &x);
+    m = _mm_mul_ps(m, _mm_set_ps1(s));
 #else
     x *= s;
     y *= s;
@@ -402,10 +542,10 @@ Vec4& Vec4::operator*=(const float s)
     return *this;
 }
 
-Vec4& Vec4::operator/=(const float s)
+Vec4& Vec4::operator/=(float s)
 {
 #if USE_SSE
-    vdiv(&x, s, &x);
+    m = _mm_div_ps(m, _mm_set_ps1(s));
 #else
     float rs = 1.0f / s;
     x *= rs;
@@ -420,61 +560,101 @@ Vec4& Vec4::operator*=(const Mat4& m) {
     return (*this = *this * m);
 }
 
-bool Vec4::operator==(const Vec4& v) const {
-    return (x == v.x && y == v.y && z == v.z && v.w == w);
+bool Vec4::operator==(const Vec4& v) const
+{
+#if USE_SSE
+    return _mm_movemask_ps(_mm_cmpeq_ps(m, v.m)) == 0xF;
+#else
+    return (x == v.x && y == v.y && z == v.z && w == v.w);
+#endif
 }
 
-bool Vec4::operator!=(const Vec4& v) const {
-    return (x != v.x || y != v.y || z != v.z || w != v.w);
+bool Vec4::operator!=(const Vec4& v) const
+{
+#if USE_SSE
+    return _mm_movemask_ps(_mm_cmpeq_ps(m, v.m)) != 0xF;
+#else
+     return (x != v.x || y != v.y || z != v.z || w != v.w);
+#endif
 }
 
 Vec4 Vec4::Scale(const Vec4& v) const
 {
 #if USE_SSE
-    Vec4 ret;
-    vmul(&x, &v.x, &ret.x);
-    return ret;
+    return _mm_mul_ps(m, v.m);
 #else
     return Vec4(x * v.x, y * v.y, z * v.z, w * v.w);
 #endif
 }
 
-float Vec4::Dot(const Vec4& v) const {
+float Vec4::Dot(const Vec4& v) const
+{
+#if USE_SSE
+    return _mm_cvtss_f32(_mm_dp_ps(m, v.m, 0b11110001));
+#else
     return x * v.x + y * v.y + z * v.z + w * v.w;
+#endif
 }
 
-float Vec4::Dot(const Plane& p) const {
+float Vec4::Dot(const Plane& p) const
+{
+#if USE_SSE
+    return _mm_cvtss_f32(_mm_dp_ps(m, p.m, 0b11110001));
+#else
     return x * p.a + y * p.b + z * p.c + w * p.d;
+#endif
 }
 
 float Vec4::Distance(const Vec4& v) const {
-    return Vec4(v.x - x, v.y - y, v.z - z, v.w - w).Length();
+    return (v - *this).Length();
 }
 
 float Vec4::DistanceSq(const Vec4& v) const {
-    return Vec4(v.x - x, v.y - y, v.z - z, v.w - w).LengthSq();
+    return (v - *this).LengthSq();
 }
 
-float Vec4::Length() const {
+float Vec4::Length() const
+{
+#if USE_SSE
+    __m128 r = _mm_dp_ps(m, m, 0b11110001);
+    __m128 c = _mm_cmpgt_ss(r, _mm_set_ss(1e-05f));
+    r = _mm_and_ps(_mm_sqrt_ss(r), c);
+    return _mm_cvtss_f32(r);
+#else
     return sqrt(x * x + y * y + z * z + w * w);
+#endif
 }
 
 float Vec4::LengthSq() const {
-    return x * x + y * y + z * z + w * w;
+    return Dot(*this);
 }
 
 void Vec4::Normalize()
 {
+#if USE_SSE
+    __m128 r = _mm_dp_ps(m, m, 0b11110001);
+    __m128 c = _mm_cmpgt_ss(r, _mm_set_ss(1e-05f));
+    r = _mm_and_ps(_mm_rsqrt_ss(r), c);
+    m = _mm_mul_ps(m, _mm_shuffle_ps(r, r, 0));
+#else
     float sqLen = x * x + y * y + z * z + w * w;
-    if(sqLen >= FloatTolerance && abs(1.0f - sqLen) > FloatTolerance)
+    if(sqLen >= FloatTolerance)
         *this /= sqrt(sqLen);
+#endif
 }
 
 Vec4 Vec4::Normalized() const
 {
+#if USE_SSE
+    __m128 r = _mm_dp_ps(m, m, 0b11110001);
+    __m128 c = _mm_cmpgt_ss(r, _mm_set_ss(1e-05f));
+    r = _mm_and_ps(_mm_rsqrt_ss(r), c);
+    return _mm_mul_ps(m, _mm_shuffle_ps(r, r, 0));
+#else
     float sqLen = x * x + y * y + z * z + w * w;
-    return sqLen >= FloatTolerance && abs(1.0f - sqLen) > FloatTolerance ?
+    return sqLen >= FloatTolerance ?
         *this / sqrt(sqLen) : *this;
+#endif
 }
 
 bool Vec4::IsNormalized() const
@@ -829,9 +1009,25 @@ Mat4 Mat4::operator/(float s) const
 Mat4 Mat4::operator*(const Mat4& m) const
 {
 #if USE_SSE
-    Mat4 ret;
-    mmul(&m11, &m.m11, &ret.m11);
-	return ret;
+    //EnforceAlignment<16>(this, &m);
+	Mat4 ret;
+	__m128 a  =             _mm_mul_ps( _mm_shuffle_ps(mm[0], mm[0], 0b00000000), m.mm[0]);
+	a         = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[0], mm[0], 0b01010101), m.mm[1]), a);
+	a         = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[0], mm[0], 0b10101010), m.mm[2]), a);
+	ret.mm[0] = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[0], mm[0], 0b11111111), m.mm[3]), a);
+	__m128 b  =             _mm_mul_ps( _mm_shuffle_ps(mm[1], mm[1], 0b00000000), m.mm[0]);
+	b         = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[1], mm[1], 0b01010101), m.mm[1]), b);
+	b         = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[1], mm[1], 0b10101010), m.mm[2]), b);
+	ret.mm[1] = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[1], mm[1], 0b11111111), m.mm[3]), b);
+	__m128 c  =             _mm_mul_ps( _mm_shuffle_ps(mm[2], mm[2], 0b00000000), m.mm[0]);
+	c         = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[2], mm[2], 0b01010101), m.mm[1]), c);
+	c         = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[2], mm[2], 0b10101010), m.mm[2]), c);
+	ret.mm[2] = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[2], mm[2], 0b11111111), m.mm[3]), c);
+	__m128 d  =             _mm_mul_ps( _mm_shuffle_ps(mm[3], mm[3], 0b00000000), m.mm[0]);
+	d         = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[3], mm[3], 0b01010101), m.mm[1]), d);
+	d         = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[3], mm[3], 0b10101010), m.mm[2]), d);
+	ret.mm[3] = _mm_add_ps( _mm_mul_ps( _mm_shuffle_ps(mm[3], mm[3], 0b11111111), m.mm[3]), d);
+    return ret;
 #else
     return Mat4(
         m11 * m.m11 + m12 * m.m21 + m13 * m.m31 + m14 * m.m41,
@@ -1689,6 +1885,10 @@ bool Plane::InBack(const Sphere& sphere) const
             sphere.center.z * c + d) < -sphere.radius;
 }
 
+float Plane::Distance(const Vec3& p) const {
+    return (a * p.x + b * p.y + c * p.z + d);
+}
+
 Plane::operator Vec4() const
 {
     return Vec4(a, b, c, d);
@@ -1699,6 +1899,35 @@ Plane::operator Vec4() const
 ////////////////////////////////
 
 
+
+////////////////////////////////
+//    BarycentricTriangle
+////////////////////////////////
+
+BarycentricTriangle::BarycentricTriangle(const Vec2& a, const Vec2& b, const Vec2& c)
+        : a(a), v0(b - a), v1(c - a)
+{
+    if(a.DistanceSq(b) < 1e-6f || a.DistanceSq(c) < 1e-6f || b.DistanceSq(c) < 1e-6f) {
+        num = 0;
+    }
+    else {
+        float den = v0.x * v1.y - v1.x * v0.y;
+        num = abs(den) >= FLT_EPSILON ? 1.0f / den : 0;
+    }
+}
+
+bool BarycentricTriangle::empty() const {
+    return num == 0;
+}
+
+Vec3 BarycentricTriangle::GetCoordinates(const Vec2& p) const {
+    Vec2 v2 = p - a;
+    Vec3 ret;
+    ret.y = (v2.x * v1.y - v1.x * v2.y) * num;
+    ret.z = (v0.x * v2.y - v2.x * v0.y) * num;
+    ret.x = 1.0f - ret.y - ret.z;
+    return ret;
+}
 
 ////////////////////////////////
 //    Sphere
@@ -1807,8 +2036,38 @@ Box& Box::operator+=(const Box& other)
 //    Rect
 ////////////////////////////////
 
+void Rect::FitInto(const Rect& rc)
+{
+    float wx = (float)rc.x;
+    float wy = (float)rc.y;
+    float ww = (float)rc.w;
+    float wh = (float)rc.h;
 
+    float s = 1.0f;
 
+    if(w > h)
+    {
+        s = wh / (float)h;
+
+        if((float)w * s > ww)
+            s = ww / (float)w;
+    }
+    else
+    {
+        s = ww / (float)w;
+
+        if((float)h * s > wh)
+            s = wh / (float)h;
+    }
+
+    float sw = (float)w * s;
+    float sh = (float)h * s;
+
+    x = wx + (sw < ww - 0.5f) ? (int)((ww - sw) * 0.5f) : 0;
+    y = ww + (sh < wh - 0.5f) ? (int)((wh - sh) * 0.5f) : 0;
+    w = (int)sw;
+    h = (int)sh;
+}
 
 //////////////////////////////////////
 //    ColorBGRA
@@ -1871,7 +2130,9 @@ const Color Color::clear(0.0f, 0.0f, 0.0f, 0.0f);
 Color::Color(Color32 c)
 {
 #if USE_SSE
-    vcvt_rgba((uint32_t&)c, &r);
+    __m128i i0 = _mm_cvtepu8_epi32(_mm_cvtsi32_si128((int&)c));
+    __m128 f0 = _mm_cvtepi32_ps(i0);
+    m = _mm_mul_ps(f0, _mm_set_ps1(InvColorMax));
 #else
     float invChanMax = 1.0f / 255.0f;
     r = invChanMax * (float)c.r;
@@ -1884,7 +2145,10 @@ Color::Color(Color32 c)
 Color::Color(uint32_t c)
 {
 #if USE_SSE
-    vcvt_bgra_to_rgba(c, &r);
+    __m128i i0 = _mm_cvtepu8_epi32(_mm_cvtsi32_si128((int)c));
+    __m128 f0 = _mm_cvtepi32_ps(i0);
+    f0 = _mm_mul_ps(f0, _mm_set_ps1(InvColorMax));
+    m = _mm_shuffle_ps(f0, f0, _MM_SHUFFLE(3, 0, 1, 2));
 #else
     float invChanMax = 1.0f / 255.0f;
     b = invChanMax * (float)(c & 0xFF);
@@ -1922,9 +2186,7 @@ Color Color::Lerp(const Color& a, const Color& b, float t)
 Color Color::Clamp(const Color& c, float lower, float upper)
 {
 #if USE_SSE
-    Color ret;
-    vclamp(&c.r, lower, upper, &ret.r);
-    return ret;
+    return _mm_min_ps(_mm_max_ps(c.m, _mm_set_ps1(lower)), _mm_set_ps1(upper));
 #else
     Color ret;
     ret.r = Math::Clamp(c.r, 0.0f, 1.0f);
@@ -1938,7 +2200,11 @@ Color Color::Clamp(const Color& c, float lower, float upper)
 Color::operator uint32_t()
 {
 #if USE_SSE
-    return vcvt_rgba_to_bgra(&r);
+    __m128 f0 = _mm_shuffle_ps(m, m, _MM_SHUFFLE(3, 0, 1, 2));
+    f0 = _mm_mul_ps(f0, _mm_set_ps1(255.0f));
+    __m128i i0 = _mm_cvtps_epi32(f0);
+    i0 = _mm_packus_epi16(_mm_packus_epi32(i0, _mm_setzero_si128()), _mm_setzero_si128());
+    return (uint32_t)_mm_cvtsi128_si32(i0);
 #else
     uint32_t bb = ((uint32_t)(b * 255.0f) & 0xFF);
     uint32_t gg = ((uint32_t)(g * 255.0f) & 0xFF) << 8;
@@ -1951,8 +2217,11 @@ Color::operator uint32_t()
 Color::operator Color32()
 {
 #if USE_SSE
-    uint32_t ret = vcvt_rgba(&r);
-    return (Color32&)ret;
+    __m128 f0 = _mm_mul_ps(m, _mm_set_ps1(255.0f));
+    __m128i i0 = _mm_cvtps_epi32(f0);
+    i0 = _mm_packus_epi16(_mm_packus_epi32(i0, _mm_setzero_si128()), _mm_setzero_si128());
+    uint32_t ret = _mm_cvtsi128_si32(i0);
+    return *(Color32*)&ret;
 #else
     uint32_t bb = ((uint32_t)(b * 255.0f) & 0xFF);
     uint32_t gg = ((uint32_t)(g * 255.0f) & 0xFF) << 8;
@@ -1973,9 +2242,7 @@ Color::operator float*() {
 Color Color::operator+(const Color& c) const
 {
 #if USE_SSE
-    Color ret;
-    vadd(&r, &c.r, &ret.r);
-    return ret;
+    return _mm_add_ps(m, c.m);
 #else
     return Color(r + c.r, g + c.g, b + c.b, a + c.a);
 #endif
@@ -1984,9 +2251,7 @@ Color Color::operator+(const Color& c) const
 Color Color::operator-(const Color& c) const
 {
 #if USE_SSE
-    Color ret;
-    vsub(&r, &c.r, &ret.r);
-    return ret;
+    return _mm_sub_ps(m, c.m);
 #else
     return Color(r - c.r, g - c.g, b - c.b, a - c.a);
 #endif
@@ -1995,9 +2260,7 @@ Color Color::operator-(const Color& c) const
 Color Color::operator*(float s) const
 {
 #if USE_SSE
-    Color ret;
-    vmul(&r, s, &ret.r);
-    return ret;
+    return _mm_mul_ps(m, _mm_set_ps1(s));
 #else
     return Color(r * s, g * s, b * s, a * s);
 #endif
@@ -2006,9 +2269,7 @@ Color Color::operator*(float s) const
 Color Color::operator*(const Color& c) const
 {
 #if USE_SSE
-    Color ret;
-    vmul(&r, &c.r, &ret.r);
-    return ret;
+    return _mm_mul_ps(m, c.m);
 #else
     return Color(r * c.r, g * c.g, b * c.b, a * c.a);
 #endif
@@ -2017,7 +2278,7 @@ Color Color::operator*(const Color& c) const
 Color& Color::operator*=(float s)
 {
 #if USE_SSE
-    vmul(&r, s, &r);
+    m = _mm_mul_ps(m, _mm_set_ps1(s));
 #else
     r *= s;
     g *= s;
@@ -2030,7 +2291,7 @@ Color& Color::operator*=(float s)
 Color& Color::operator*=(const Color& c)
 {
 #if USE_SSE
-    vmul(&r, &c.r, &r);
+    m = _mm_mul_ps(m, c.m);
 #else
     r *= c.r;
     g *= c.g;
@@ -2043,12 +2304,25 @@ Color& Color::operator*=(const Color& c)
 Color& Color::operator+=(const Color& c)
 {
 #if USE_SSE
-    vadd(&r, &c.r, &r);
+    m = _mm_add_ps(m, c.m);
 #else
     r += c.r;
     g += c.g;
     b += c.b;
     a += c.a;
+#endif
+    return *this;
+}
+
+Color& Color::operator-=(const Color& c)
+{
+#if USE_SSE
+    m = _mm_sub_ps(m, c.m);
+#else
+    r -= c.r;
+    g -= c.g;
+    b -= c.b;
+    a -= c.a;
 #endif
     return *this;
 }

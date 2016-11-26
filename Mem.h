@@ -39,6 +39,17 @@ bool IsAligned(const void* ptr)
     return (((uintptr_t)ptr) & mask) == 0;
 }
 
+template<int alignment, typename T>
+inline void EnforceAlignment(const T* a) {
+    assert(IsAligned<alignment>(a));
+}
+
+template<int alignment, typename T, typename... Ts>
+inline void EnforceAlignment(const T* a, const Ts*... ts) {
+    EnforceAlignment<alignment>(a);
+    EnforceAlignment<alignment>(ts...);
+}
+
 template<typename T, size_t alignment, typename... Args>
 std::shared_ptr<T> AlignedMakeShared(Args&&... args) {
     return std::shared_ptr<T>(AlignedAlloc<T>(1, alignment, std::forward<Args>(args)...),

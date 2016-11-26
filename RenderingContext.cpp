@@ -10,6 +10,7 @@
 #include "Shader.h"
 #include "Scene.h"
 #include <cmath>
+#include <array>
 
 RenderingContext::RenderingContext(Application* app, uint32_t width, uint32_t height, size_t threadCount)
 {
@@ -17,13 +18,17 @@ RenderingContext::RenderingContext(Application* app, uint32_t width, uint32_t he
 
     _width = width;
     _height = height;
-
-    _depthBuffer.reset(AlignedAlloc<float>(_width * _height, 16));
-    _colorBuffer.reset(AlignedAlloc<uint32_t>(_width * _height, 16));
+    
     _clearColor = Color::clear;
     _rasterizationMode = RasterizationMode::Halfspace;
     _mipmapsEnabled = true;
+    _antiAliasingMode = AntiAliasingMode::Off;
     
+    _renderWidth = _width;
+    _renderHeight = _height;
+    _colorBuffer.Resize(width, height, 1);
+    _depthBuffer.Resize(width, height, 1);
+
     for(size_t i = 0; i < threadCount; ++i)
         _renderThreads.push_back(make_unique<RenderThread>());
 }
@@ -47,6 +52,50 @@ void RenderingContext::rasterizationMode(RasterizationMode mode) {
 
 RasterizationMode RenderingContext::rasterizationMode() const {
     return _rasterizationMode;
+}
+
+void RenderingContext::antiAliasingMode(AntiAliasingMode mode)
+{
+    if(mode == AntiAliasingMode::Off
+    || (mode == AntiAliasingMode::MSAA_4X && _rasterizationMode == RasterizationMode::Scanline))
+    {
+        _renderWidth = _width;
+        _renderHeight = _height;
+        _colorBuffer.Resize(_renderWidth, _renderHeight, 1);
+        _depthBuffer.Resize(_renderWidth, _renderHeight, 1);
+        _aaBuffer.Resize(0, 0, 0);
+    }
+    else if(mode == AntiAliasingMode::SSAA_2X)
+    {
+        _renderWidth = _width * 2;
+        _renderHeight = _height * 2;
+        _colorBuffer.Resize(_width, _height, 1);
+        _depthBuffer.Resize(_width, _height, 4);
+        _aaBuffer.Resize(_width, _height, 4);
+    }
+    else if(mode == AntiAliasingMode::SSAA_4X)
+    {
+        _renderWidth = _width * 4;
+        _renderHeight = _height * 4;
+        _colorBuffer.Resize(_width, _height, 1);
+        _depthBuffer.Resize(_width, _height, 16);
+        _aaBuffer.Resize(_width, _height, 16);
+    }
+    else if(mode == AntiAliasingMode::MSAA_4X)
+    {
+        _renderWidth = _width;
+        _renderHeight = _height;
+        _colorBuffer.Resize(_width, _height, 1);
+        _depthBuffer.Resize(_width, _height, 4);
+        _aaBuffer.Resize(_width, _height, 4);
+    }
+
+    _antiAliasingMode = mode;
+}
+
+AntiAliasingMode RenderingContext::antiAliasingMode() const
+{
+    return _antiAliasingMode;
 }
 
 void RenderingContext::mipmapsEnabled(bool enabled) {
@@ -114,9 +163,9 @@ void RenderingContext::Draw(const shared_ptr<Scene>& scene)
                     tmp[i].position.w = zr;
 
                     // viewport transformation -> screen space
-                    tmp[i].position.x = (tmp[i].position.x + 1.0f) * 0.5f * (float)_width + 0.5f;
-                    tmp[i].position.y = (tmp[i].position.y + 1.0f) * 0.5f * (float)_height + 0.5f;
-                    tmp[i].position.y = (float)_height - tmp[i].position.y - 1.0f;
+                    tmp[i].position.x = (tmp[i].position.x + 1.0f) * 0.5f * (float)_renderWidth;
+                    tmp[i].position.y = (tmp[i].position.y + 1.0f) * 0.5f * (float)_renderHeight;
+                    tmp[i].position.y = (float)_renderHeight - tmp[i].position.y;
                 }
 
                 nVerts = ClipScreen(tmp, nVerts);
@@ -132,41 +181,34 @@ void RenderingContext::Draw(const shared_ptr<Scene>& scene)
             }
 
             _xverts.clear();
-
             size_t end = _cverts.size();
-            
-            uintptr_t offset = _shaderStates.size();
-            ShaderVisitor vistor(&_shaderStates);
-            obj->shader->Accept(&vistor);
+            obj->shader->CopyTo(_shaders);
 
-            _drawCalls.push_back(DrawCall{ start, end, obj.get(), (Shader*)offset });
+            _drawCalls.push_back({ start, end, obj.get(), nullptr });
         }
     }
-
-    for(auto& call : _drawCalls) {
-        uintptr_t offset = (uintptr_t)call.shader;
-        call.shader = (Shader*)(_shaderStates.data() + offset);
+    
+    auto st = _shaders.begin();
+    for(auto it = _drawCalls.begin(); it != _drawCalls.end(); ++it, ++st) {
+        it->shader = *st;
     }
 
     size_t threadCount = _renderThreads.size();
-    int segment = _height / threadCount;
-    int lastseg = _height - segment * (threadCount - 1);
+    int segment = _renderHeight / threadCount;
+    int lastseg = _renderHeight - segment * (threadCount - 1);
 
     size_t i = 0;
     for( ; i < threadCount - 1; ++i)
-        _renderThreads[i]->Execute(this, Rect(0, segment * i, _width, segment));
+        _renderThreads[i]->Execute(this, Rect(0, segment * i, _renderWidth, segment));
 
     if(i < threadCount)
-        _renderThreads[i]->Execute(this, Rect(0, segment * i, _width, lastseg));
+        _renderThreads[i]->Execute(this, Rect(0, segment * i, _renderWidth, lastseg));
 
     for(size_t j = 0; j < threadCount; ++j)
         _renderThreads[j]->Wait();
 
-    for(auto& call : _drawCalls)
-        call.shader->~Shader();
-
     _drawCalls.clear();
-    _shaderStates.clear();
+    _shaders.clear();
     _cverts.clear();
 }
 
@@ -241,7 +283,7 @@ int RenderingContext::ClipScreen(Vertex (&verts)[9], int count)
         {
             float t = (left - p0.position.x) / (p1.position.x - p0.position.x);
             tmp[newCount] = p0 + (p1 - p0) * t;
-            tmp[newCount++].position.x = 0.0f;
+            tmp[newCount++].position.x = left;
         }
 
         if(in1)
@@ -259,7 +301,7 @@ int RenderingContext::ClipScreen(Vertex (&verts)[9], int count)
         Vertex &p0 = tmp[i];
         Vertex &p1 = tmp[(i + 1) % count];
 
-        float right = (float)(_width - 1);
+        float right = (float)_renderWidth;
         bool in0 = p0.position.x <= right;
         bool in1 = p1.position.x <= right;
         
@@ -267,7 +309,7 @@ int RenderingContext::ClipScreen(Vertex (&verts)[9], int count)
         {
             float t = (right - p0.position.x) / (p1.position.x - p0.position.x);
             verts[newCount] = p0 + (p1 - p0) * t;
-            verts[newCount++].position.x = (float)(_width - 1);
+            verts[newCount++].position.x = right;
         }
 
         if(in1)
@@ -293,7 +335,7 @@ int RenderingContext::ClipScreen(Vertex (&verts)[9], int count)
         {
             float t = (top - p0.position.y) / (p1.position.y - p0.position.y);
             tmp[newCount] = p0 + (p1 - p0) * t;
-            tmp[newCount++].position.y = 0.0f;
+            tmp[newCount++].position.y = top;
         }
 
         if(in1)
@@ -311,7 +353,7 @@ int RenderingContext::ClipScreen(Vertex (&verts)[9], int count)
         Vertex &p0 = tmp[i];
         Vertex &p1 = tmp[(i + 1) % count];
 
-        float bot = (float)(_height - 1);
+        float bot = (float)_renderHeight;
         bool in0 = p0.position.y <= bot;
         bool in1 = p1.position.y <= bot;
         
@@ -319,7 +361,7 @@ int RenderingContext::ClipScreen(Vertex (&verts)[9], int count)
         {
             float t = (bot - p0.position.y) / (p1.position.y - p0.position.y);
             verts[newCount] = p0 + (p1 - p0) * t;
-            verts[newCount++].position.y = (float)(_height - 1);
+            verts[newCount++].position.y = bot;
         }
 
         if(in1)
@@ -331,73 +373,39 @@ int RenderingContext::ClipScreen(Vertex (&verts)[9], int count)
     return newCount;
 }
 
-void RenderingContext::ExtrapolatePlane(const Vertex& v0, const Vertex& v1, const Vertex& v2,
-                                        const Vec2& corner00, const Vec2& corner01, const Vec2& corner10,
-                                        Vertex& v00, Vertex& v01, Vertex& v10)
-{
-    Vec2 a = v0.position;
-    Vec2 b = v1.position;
-    Vec2 c = v2.position;
-
-    Vec2 e0 = b - a;
-    Vec2 e1 = c - a;
-    Vec2 e2a = corner00 - a;
-    Vec2 e2b = corner01 - a;
-    Vec2 e2c = corner10 - a;
-
-    float d00 = e0.Dot(e0);
-    float d01 = e0.Dot(e1);
-    float d11 = e1.Dot(e1);
-    float d20a = e2a.Dot(e0);
-    float d20b = e2b.Dot(e0);
-    float d20c = e2c.Dot(e0);
-    float d21a = e2a.Dot(e1);
-    float d21b = e2b.Dot(e1);
-    float d21c = e2c.Dot(e1);
-
-    float denom = d00 * d11 - d01 * d01;
-    float num = 1.0f / denom;
-
-    float va = (d11 * d20a - d01 * d21a) * num;
-    float wa = (d00 * d21a - d01 * d20a) * num;
-    float ua = 1.0f - va - wa;
-    v00 = v0 * ua + v1 * va + v2 * wa;
-
-    float vb = (d11 * d20b - d01 * d21b) * num;
-    float wb = (d00 * d21b - d01 * d20b) * num;
-    float ub = 1.0f - vb - wb;
-    v01 = v0 * ub + v1 * vb + v2 * wb;
-
-    float vc = (d11 * d20c - d01 * d21c) * num;
-    float wc = (d00 * d21c - d01 * d20c) * num;
-    float uc = 1.0f - vc - wc;
-    v10 = v0 * uc + v1 * vc + v2 * wc;
-}
-
 float RenderingContext::CalcMipLevel(const Vec2& uv00, const Vec2& uv01, const Vec2& uv10, const Vec2& texSize, float mipBias, int mipCount)
 {
-    if(!_mipmapsEnabled)
-        return 0.0f;
-
     Vec2 uvDx = (uv01 - uv00).Scale(texSize);
     Vec2 uvDy = (uv10 - uv00).Scale(texSize);
-
     float mipLevel = 0.5f * Math::Log2(max(uvDx.LengthSq(), uvDy.LengthSq()));
     return Math::Clamp(mipLevel + mipBias, 0.0f, (float)(mipCount - 1));
 }
 
+void RenderingContext::Rasterize(const Rect& rect, const Vertex& v0, const Vertex& v1, const Vertex& v2, DrawCall* drawCall)
+{
+    switch(_rasterizationMode)
+    {
+    case RasterizationMode::Scanline:
+        RasterizeScanline(rect, v0, v1, v2, drawCall);
+        break;
+
+    case RasterizationMode::Halfspace:
+        if(_antiAliasingMode == AntiAliasingMode::MSAA_4X)
+            RasterizeHalfSpaceMSAA(rect, v0, v1, v2, drawCall);
+        else
+            RasterizeHalfSpace(rect, v0, v1, v2, drawCall);
+        break;
+    }
+}
+
 void RenderingContext::RasterizeHalfSpace(const Rect& rect, const Vertex& v0, const Vertex& v1, const Vertex& v2, DrawCall* drawCall)
 {
-    Texture* tex = drawCall->obj->texture.get();
-    Shader* shader = drawCall->shader;
-    bool backfaceCullingEnabled = drawCall->obj->backfaceCullingEnabled;
-
     Vec2 sv1 = v0.position;
     Vec2 sv2 = v1.position;
     Vec2 sv3 = v2.position;
     
-    int minx = Math::Ceil(Math::Min(sv1.x, sv2.x, sv3.x));
-    int miny = Math::Ceil(Math::Min(sv1.y, sv2.y, sv3.y));
+    int minx = Math::Floor(Math::Min(sv1.x, sv2.x, sv3.x));
+    int miny = Math::Floor(Math::Min(sv1.y, sv2.y, sv3.y));
     int maxx = Math::Ceil(Math::Max(sv1.x, sv2.x, sv3.x));
     int maxy = Math::Ceil(Math::Max(sv1.y, sv2.y, sv3.y));
     
@@ -409,115 +417,357 @@ void RenderingContext::RasterizeHalfSpace(const Rect& rect, const Vertex& v0, co
     if(maxx - minx < 1 || maxy - miny < 1)
         return;
 
-    Vertex v00;
-    Vertex v01;
-    Vertex v10;
+    BarycentricTriangle tri(sv1, sv2, sv3);
+    if(tri.empty())
+        return;
 
-    ExtrapolatePlane(v0, v1, v2,
-                    {(float)minx, (float)miny},
-                    {(float)maxx, (float)miny},
-                    {(float)minx, (float)maxy},
-                    v00, v01, v10);
+    Vec2 minPt = Vec2((float)minx + 0.5f, (float)miny + 0.5f);
+    Vertex v00 = tri.Interpolate(v0, v1, v2, minPt);
+    Vertex v01 = tri.Interpolate(v0, v1, v2, minPt + Vec2(100, 0));
+    Vertex v10 = tri.Interpolate(v0, v1, v2, minPt + Vec2(0, 100));
+    Vertex xDelta = (v01 - v00) * 0.01f;
+    Vertex yDelta = (v10 - v00) * 0.01f;
 
-    Vertex hEdge = v01 - v00;
-    Vertex vEdge = v10 - v00;
-    float dx = 1.0f / hEdge.position.x;
-    float dy = 1.0f / vEdge.position.y;
-    Vertex xDelta = hEdge * dx;
-    Vertex yDelta = vEdge * dy;
+    // det > 0 for any point 'p' that is to the left of (v2 - v1) in screen space
+    // float det = (v2.y - v1.y) * (p.x - v1.x) - (v2.x - v1.x) * (p.y - v1.y);
 
-    Vec4 Dx(sv1.x - sv2.x,
-            sv2.x - sv3.x,
-            sv3.x - sv1.x, 0);
+    Vec3 Dx(sv2.y - sv1.y,
+            sv3.y - sv2.y,
+            sv1.y - sv3.y);
 
-    Vec4 Dy(sv1.y - sv2.y,
-            sv2.y - sv3.y,
-            sv3.y - sv1.y, 0);
+    Vec3 Dy(-(sv2.x - sv1.x),
+            -(sv3.x - sv2.x),
+            -(sv1.x - sv3.x));
 
-    Vec4 C(Dy.x * sv1.x - Dx.x * sv1.y,
-           Dy.y * sv2.x - Dx.y * sv2.y,
-           Dy.z * sv3.x - Dx.z * sv3.y, 0);
-
-    if(Dy.x < 0 || (abs(Dy.x) < Math::FloatTolerance && Dx.x > 0)) C.x++;
-    if(Dy.y < 0 || (abs(Dy.y) < Math::FloatTolerance && Dx.y > 0)) C.y++;
-    if(Dy.z < 0 || (abs(Dy.z) < Math::FloatTolerance && Dx.z > 0)) C.z++;
-
-    Vec4 Cy = C + Dx * (float)miny - Dy * (float)minx;
+    Vec3 orig(Dx.x * -sv1.x + Dy.x * -sv1.y,
+              Dx.y * -sv2.x + Dy.y * -sv2.y,
+              Dx.z * -sv3.x + Dy.z * -sv3.y);
     
+    Vec3 off = Vec3::zero;
+    if(sv2.y > sv1.y || (abs(sv2.y - sv1.y) < FLT_EPSILON && sv2.x < sv1.x)) off.x += FLT_EPSILON;
+    if(sv3.y > sv2.y || (abs(sv3.y - sv2.y) < FLT_EPSILON && sv3.x < sv2.x)) off.y += FLT_EPSILON;
+    if(sv1.y > sv3.y || (abs(sv1.y - sv3.y) < FLT_EPSILON && sv1.x < sv3.x)) off.z += FLT_EPSILON;
+    orig += off;
+    off *= -2.0f;
+    
+    Vec3 Cy = orig + Dx * (float)(minx + 0.5f) + Dy * (float)(miny + 0.5f);
+
     Vertex yv = v00;
 
+    CullMode cullMode = drawCall->obj->cullMode;
+    Texture* tex = drawCall->obj->texture.get();
     Vec2 texSize = tex->size();
     float mipBias = tex->mipmapBias();
     int mipCount = tex->mipmapCount();
-    
+    Shader* shader = drawCall->shader;
+    RenderBuffer<uint32_t>& outBuffer = _antiAliasingMode == AntiAliasingMode::Off ?
+                                            _colorBuffer : _aaBuffer;
+
     for(int y = miny; y < maxy; y++)
     {
-        Vec4 Cx = Cy;
-
+        Vec3 Cx = Cy;
         Vertex xv;
-        uint32_t *colorBuffer = nullptr;
-        float *depthBuffer = nullptr;
 
         int x = minx;
 
         for( ; x < maxx; ++x)
         {
-            if(Cx.x > 0 && Cx.y > 0 && Cx.z > 0 || (!backfaceCullingEnabled && Cx.x < 0 && Cx.y < 0 && Cx.z < 0))
+            bool visible = false;
+            
+            if(cullMode != CullMode::Front)
             {
-                uint32_t offset = y * _width + x;
-                colorBuffer = _colorBuffer.get() + offset;
-                depthBuffer = _depthBuffer.get() + offset;
+                visible |= Cx.x > 0 && Cx.y > 0 && Cx.z > 0;
+            }
 
+            if(cullMode != CullMode::Back)
+            {
+                Vec3 CxBack = Cx + off;
+                visible |= CxBack.x < 0 && CxBack.y < 0 && CxBack.z < 0;
+            }
+
+            if(visible)
+            {
                 xv = yv + xDelta * (float)(x - minx);
                 break;
             }
 
-            Cx -= Dy;
+            Cx += Dx;
         }
+
+        uint32_t rowOffset;
+        if(_antiAliasingMode == AntiAliasingMode::SSAA_2X)
+            rowOffset = outBuffer.GetSuperSampleRowOffset<2>(y);
+        else if(_antiAliasingMode == AntiAliasingMode::SSAA_4X)
+            rowOffset = outBuffer.GetSuperSampleRowOffset<4>(y);
+        else
+            rowOffset = y * _width;
 
         for( ; x < maxx; ++x)
         {
-            if(!(Cx.x > 0 && Cx.y > 0 && Cx.z > 0 || (!backfaceCullingEnabled && Cx.x < 0 && Cx.y < 0 && Cx.z < 0)))
-                break;
+            bool visible = false;
+            
+            if(cullMode != CullMode::Front)
+                visible |= Cx.x > 0 && Cx.y > 0 && Cx.z > 0;
 
-            if(xv.position.w > *depthBuffer)
+            if(cullMode != CullMode::Back)
             {
-                Vertex frag = xv / xv.position.w;
-
-                Vec2 uv00 = frag.texcoord;
-                Vec2 uv01 = (xv.texcoord + xDelta.texcoord) / (xv.position.w + xDelta.position.w);
-                Vec2 uv10 = (xv.texcoord + yDelta.texcoord) / (xv.position.w + yDelta.position.w);
-                float mipLevel = CalcMipLevel(uv00, uv01, uv10, texSize, mipBias, mipCount);
-                
-                bool discard = false;
-                Color output = Color::Clamp(shader->ProcessPixel(frag, mipLevel, discard));
-                if(!discard)
-                {
-                    *colorBuffer = output;
-                    *depthBuffer = xv.position.w;
-                }
+                Vec3 CxBack = Cx + off;
+                visible |= CxBack.x < 0 && CxBack.y < 0 && CxBack.z < 0;
             }
 
-            ++colorBuffer;
-            ++depthBuffer;
-            xv += xDelta;
-            Cx -= Dy;
+            if(visible)
+            {
+                uint32_t offset;
+                if(_antiAliasingMode == AntiAliasingMode::SSAA_2X)
+                    offset = rowOffset + outBuffer.GetSuperSampleColumnOffset<2>(x);
+                else if(_antiAliasingMode == AntiAliasingMode::SSAA_4X)
+                    offset = rowOffset + outBuffer.GetSuperSampleColumnOffset<4>(x);
+                else
+                    offset = rowOffset + x;
+
+                uint32_t *colorBuffer = outBuffer.data() + offset;
+                float *depthBuffer = _depthBuffer.data() + offset;
+
+                if(xv.position.w > *depthBuffer)
+                {
+                    Vertex frag = xv / xv.position.w;
+                    Vec2 uv00 = frag.texcoord;
+                    Vec2 uv01 = (xv.texcoord + xDelta.texcoord) / (xv.position.w + xDelta.position.w);
+                    Vec2 uv10 = (xv.texcoord + yDelta.texcoord) / (xv.position.w + yDelta.position.w);
+                    float mipLevel = _mipmapsEnabled ?
+                        CalcMipLevel(uv00, uv01, uv10, texSize, mipBias, mipCount) : 0;
+                    
+                    bool discard = false;
+                    Color output = Color::Clamp(shader->ProcessPixel(frag, mipLevel, discard));
+                    if(!discard) {
+                        *colorBuffer = output;
+                        *depthBuffer = xv.position.w;
+                    }
+                }
+
+                xv += xDelta;
+                Cx += Dx;
+            }
+            else
+            {
+                break;
+            }
         }
         
         yv += yDelta;
-        Cy += Dx;
+        Cy += Dy;
+    }
+}
+
+void RenderingContext::RasterizeHalfSpaceMSAA(const Rect& rect, const Vertex& v0, const Vertex& v1, const Vertex& v2, DrawCall* drawCall)
+{
+    Vec2 sv1 = v0.position;
+    Vec2 sv2 = v1.position;
+    Vec2 sv3 = v2.position;
+    
+    int minx = Math::Floor(Math::Min(sv1.x, sv2.x, sv3.x));
+    int miny = Math::Floor(Math::Min(sv1.y, sv2.y, sv3.y));
+    int maxx = Math::Ceil(Math::Max(sv1.x, sv2.x, sv3.x));
+    int maxy = Math::Ceil(Math::Max(sv1.y, sv2.y, sv3.y));
+
+    minx = Math::Clamp(minx, rect.x, rect.x + rect.w);
+    maxx = Math::Clamp(maxx, rect.x, rect.x + rect.w);
+    miny = Math::Clamp(miny, rect.y, rect.y + rect.h);
+    maxy = Math::Clamp(maxy, rect.y, rect.y + rect.h);
+
+    if((maxx - minx < 1) || (maxy - miny < 1))
+        return;
+
+    BarycentricTriangle tri(sv1, sv2, sv3);
+    if(tri.empty())
+        return;
+
+    Vec2 minPt = Vec2((float)minx + 0.5f, (float)miny + 0.5f);
+    Vertex v00 = tri.Interpolate(v0, v1, v2, minPt);
+    Vertex v01 = tri.Interpolate(v0, v1, v2, minPt + Vec2(100, 0));
+    Vertex v10 = tri.Interpolate(v0, v1, v2, minPt + Vec2(0, 100));
+    Vertex xDelta = (v01 - v00) * 0.01f;
+    Vertex yDelta = (v10 - v00) * 0.01f;
+
+    // det > 0 for any point 'p' that is to the left of (v2 - v1) in screen space
+    // float det = (v2.y - v1.y) * (p.x - v1.x) - (v2.x - v1.x) * (p.y - v1.y);
+
+    Vec3 Dx(sv2.y - sv1.y,
+            sv3.y - sv2.y,
+            sv1.y - sv3.y);
+
+    Vec3 Dy(-(sv2.x - sv1.x),
+            -(sv3.x - sv2.x),
+            -(sv1.x - sv3.x));
+
+    Vec3 orig(Dx.x * -sv1.x + Dy.x * -sv1.y,
+              Dx.y * -sv2.x + Dy.y * -sv2.y,
+              Dx.z * -sv3.x + Dy.z * -sv3.y);
+    
+    Vec3 off = Vec3::zero;
+    if(sv2.y > sv1.y || (abs(sv2.y - sv1.y) < FLT_EPSILON && sv2.x < sv1.x)) off.x += FLT_EPSILON;
+    if(sv3.y > sv2.y || (abs(sv3.y - sv2.y) < FLT_EPSILON && sv3.x < sv2.x)) off.y += FLT_EPSILON;
+    if(sv1.y > sv3.y || (abs(sv1.y - sv3.y) < FLT_EPSILON && sv1.x < sv3.x)) off.z += FLT_EPSILON;
+    orig += off;
+    off *= -2.0f;
+
+    constexpr int SAMPLE_COUNT = 4;
+    Vec2 sampleOffset[SAMPLE_COUNT]{
+        {  0.375f, -0.125f },
+        { -0.125f, -0.375f },
+        { -0.375f,  0.125f },
+        {  0.125f,  0.375f },
+    };
+
+    array<Vec3, SAMPLE_COUNT> Cy;
+    for(int i = 0; i < SAMPLE_COUNT; ++i)
+        Cy[i] = orig + Dx * (minx + 0.5f + sampleOffset[i].x) + Dy * (miny + 0.5f + sampleOffset[i].y);
+    
+    Vertex yv = v00;
+
+    CullMode cullMode = drawCall->obj->cullMode;
+    Texture* tex = drawCall->obj->texture.get();
+    Vec2 texSize = tex->size();
+    float mipBias = tex->mipmapBias();
+    int mipCount = tex->mipmapCount();
+    Shader* shader = drawCall->shader;
+    RenderBuffer<uint32_t>& outBuffer = _antiAliasingMode == AntiAliasingMode::Off ?
+                                            _colorBuffer : _aaBuffer;
+
+    for(int y = miny; y < maxy; ++y)
+    {
+        array<Vec3, SAMPLE_COUNT> Cx = Cy;
+        
+        Vertex xv;
+        array<float, SAMPLE_COUNT> ws;
+        uint32_t *colorBuffer = nullptr;
+        float *depthBuffer = nullptr;
+        
+        int x = minx;
+
+        for( ; x < maxx; ++x)
+        {
+            uint8_t coverage = 0;
+
+            if(cullMode != CullMode::Front)
+            {
+                for(int i = 0; i < SAMPLE_COUNT; ++i)
+                    coverage |= (Cx[i].x > 0 && Cx[i].y > 0 && Cx[i].z > 0) << i;
+            }
+
+            if(cullMode != CullMode::Back)
+            {
+                for(int i = 0; i < SAMPLE_COUNT; ++i)
+                {
+                    Vec3 CxBack = Cx[i] + off;
+                    coverage |= (CxBack.x < 0 && CxBack.y < 0 && CxBack.z < 0) << i;
+                }
+            }
+
+            if(coverage)
+            {
+                xv = yv + xDelta * (float)(x - minx);
+
+                for(int i = 0; i < SAMPLE_COUNT; ++i)
+                    ws[i] = xv.position.w + xDelta.position.w * sampleOffset[i].x + yDelta.position.w * sampleOffset[i].y;
+
+                uint32_t offset = (y * _renderWidth + x) * SAMPLE_COUNT;
+                colorBuffer = outBuffer.data() + offset;
+                depthBuffer = _depthBuffer.data() + offset;
+
+                break;
+            }
+
+            for(int i = 0; i < SAMPLE_COUNT; ++i)
+                Cx[i] += Dx;
+        }
+        
+        for( ; x < maxx; ++x)
+        {
+            uint8_t coverage = 0;
+
+            if(cullMode != CullMode::Front)
+            {
+                for(int i = 0; i < SAMPLE_COUNT; ++i)
+                    coverage |= (Cx[i].x > 0 && Cx[i].y > 0 && Cx[i].z > 0) << i;
+            }
+
+            if(cullMode != CullMode::Back)
+            {
+                for(int i = 0; i < SAMPLE_COUNT; ++i)
+                {
+                    Vec3 CxBack = Cx[i] + off;
+                    coverage |= (CxBack.x < 0 && CxBack.y < 0 && CxBack.z < 0) << i;
+                }
+            }
+
+            if(coverage)
+            {
+                uint8_t depth = 0;
+                for(int i = 0; i < SAMPLE_COUNT; ++i)
+                    depth |= (ws[i] > depthBuffer[i]) << i;
+                
+                uint8_t fill = coverage & depth;
+                if(fill)
+                {
+                    Vertex frag = xv / xv.position.w;
+                    Vec2 uv00 = frag.texcoord;
+                    Vec2 uv01 = (xv.texcoord + xDelta.texcoord) / (xv.position.w + xDelta.position.w);
+                    Vec2 uv10 = (xv.texcoord + yDelta.texcoord) / (xv.position.w + yDelta.position.w);
+                    float mipLevel = _mipmapsEnabled ?
+                        CalcMipLevel(uv00, uv01, uv10, texSize, mipBias, mipCount) : 0;
+                    
+                    bool discard = false;
+                    Color output = Color::Clamp(shader->ProcessPixel(frag, mipLevel, discard));
+                    if(!discard)
+                    {
+                        for(int i = 0; i < SAMPLE_COUNT; ++i)
+                        {
+                            if(fill & (1 << i)) {
+                                colorBuffer[i] = output;
+                                depthBuffer[i] = ws[i];
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Not sure why yet, but MSAA sampling causes intermittent
+                // visibility, which means bailing early skips covered pixels.
+                //break;
+            }
+
+            xv += xDelta;
+
+            for(int i = 0; i < SAMPLE_COUNT; ++i) {
+                Cx[i] += Dx;
+                ws[i] += xDelta.position.w;
+            }
+            colorBuffer += SAMPLE_COUNT;
+            depthBuffer += SAMPLE_COUNT;
+        }
+        
+        yv += yDelta;
+
+        for(int i = 0; i < SAMPLE_COUNT; ++i)
+            Cy[i] += Dy;
     }
 }
 
 void RenderingContext::RasterizeScanline(const Rect& rect, const Vertex& _v0, const Vertex& _v1, const Vertex& _v2, DrawCall* drawCall)
 {
-    if(drawCall->obj->backfaceCullingEnabled)
+    auto cullMode = drawCall->obj->cullMode;
+    if(cullMode != CullMode::None)
     {
         // cross product in screen space -> triangle back-facing?
-        Vec2 left(_v0.position.x - _v1.position.x, _v0.position.y - _v1.position.y);
-        Vec2 right(_v2.position.x - _v1.position.x, _v2.position.y - _v1.position.y);
-        
-        if(right.x * left.y - right.y * left.x > 0)
+        Vec2 a = Vec2(_v2.position) - Vec2(_v1.position);
+        Vec2 b = Vec2(_v0.position) - Vec2(_v1.position);
+        float det = a.Det(b);
+
+        if(cullMode == CullMode::Back && det > 0)
+            return;
+        else if(cullMode == CullMode::Front && det < 0)
             return;
     }
 
@@ -525,155 +775,99 @@ void RenderingContext::RasterizeScanline(const Rect& rect, const Vertex& _v0, co
     Vertex v1 = _v1;
     Vertex v2 = _v2;
 
-    // sort vertices by Y coordinate
     if(v2.position.y < v1.position.y) swap(v2, v1);
     if(v2.position.y < v0.position.y) swap(v2, v0);
     if(v1.position.y < v0.position.y) swap(v1, v0);
 
-    // render top half of triangle if non-empty
-    if(Math::Ceil(v0.position.y) < Math::Ceil(v1.position.y))
-    {
-        float t = (v1.position.y - v0.position.y) / (v2.position.y - v0.position.y);
-        Vertex center = v0 + (v2 - v0) * t;
+    Vec2 sv1 = v0.position;
+    Vec2 sv2 = v1.position;
+    Vec2 sv3 = v2.position;
+
+    BarycentricTriangle tri(sv1, sv2, sv3);
+    if(tri.empty())
+        return;
+
+    Vertex v00 = tri.Interpolate(v0, v1, v2, sv1);
+    Vertex v01 = tri.Interpolate(v0, v1, v2, sv1 + Vec2(100, 0));
+    Vertex v10 = tri.Interpolate(v0, v1, v2, sv1 + Vec2(0, 100));
+    Vertex xDelta = (v01 - v00) * 0.01f;
+    Vertex yDelta = (v10 - v00) * 0.01f;
+
+    float t = (v1.position.y - v0.position.y) / (v2.position.y - v0.position.y);
+    Vertex v1b = v0 + (v2 - v0) * t;
+    if(v1b.position.x < v1.position.x) swap(v1, v1b);
     
-        if(center.position.x < v1.position.x)
-        {
-            //   v0
-            // cen  v1
-            FillTriangle(rect, v0, center, v1, true, drawCall);
-        }
-        else
-        {
-            //   v0
-            // v1  cen
-            FillTriangle(rect, v0, v1, center, true, drawCall);
-        }
-    }
+    if(Math::Ceil(v0.position.y) < Math::Ceil(v1.position.y))
+        FillSpans(rect, v0, v1, v0, v1b, xDelta, yDelta, drawCall);
 
-    // render bottom half of triangle if non-empty
     if(Math::Ceil(v1.position.y) < Math::Ceil(v2.position.y))
-    {
-        float t = (v1.position.y - v0.position.y) / (v2.position.y - v0.position.y);
-        Vertex center = v0 + (v2 - v0) * t;
-
-        if(center.position.x < v1.position.x)
-        {
-            // cen  v1
-            //    v2
-            FillTriangle(rect, center, v1, v2, false, drawCall);
-        }
-        else
-        {
-            // v1  cen
-            //   v2
-            FillTriangle(rect, v1, center, v2, false, drawCall);
-        }
-    }
+        FillSpans(rect, v1, v2, v1b, v2, xDelta, yDelta, drawCall);
 }
 
-void RenderingContext::FillTriangle(const Rect& rect, const Vertex& v0, const Vertex& v1, const Vertex& v2, bool isTop, DrawCall* drawCall)
+void RenderingContext::FillSpans(const Rect& rect, const Vertex& _l0, const Vertex& _l1, const Vertex& _r0, const Vertex& _r1, const Vertex& _xDelta, const Vertex& _yDelta, DrawCall* drawCall)
 {
-    Texture* tex = drawCall->obj->texture.get();
-    Shader* shader = drawCall->shader;
-    bool backfaceCullingEnabled = drawCall->obj->backfaceCullingEnabled;
+    Vertex l0 = _l0;
+    Vertex l1 = _l1;
+    Vertex r0 = _r0;
+    Vertex r1 = _r1;
 
-    Vertex p0l;
-    Vertex p0r;
-    Vertex p1l;
-    Vertex p1r;
+    Vertex xDelta = _xDelta;
+    Vertex yDelta = _yDelta;
 
-    Vertex xDelta;
-    Vertex yDelta;
-
-    if(isTop)
-    {
-        //   v0
-        // v1  v2
-        p0l = v0;
-        p0r = v0;
-        p1l = v1;
-        p1r = v2;
-
-        Vertex hEdge = v2 - v1;
-        
-        float dx = 1.0f / hEdge.position.x;
-        xDelta = hEdge * dx;
-
-        Vec4 p = v0.position - v1.position;
-        Vec4 n = xDelta.position;
-
-        float t = p.Dot(n) / n.Dot(n);
-        Vertex y2 = v1 + xDelta * t;
-
-        Vertex vEdge = y2 - v0;
-
-        float dy = 1.0f / vEdge.position.y;
-        yDelta = vEdge * dy;
-    }
-    else
-    {
-        // v0  v1
-        //   v2
-        p0l = v0;
-        p0r = v1;
-        p1l = v2;
-        p1r = v2;
-
-        Vertex hEdge = v1 - v0;
-        
-        float dx = 1.0f / hEdge.position.x;
-        xDelta = hEdge * dx;
-
-        Vec4 p = v2.position - v0.position;
-        Vec4 n = xDelta.position;
-
-        float t = p.Dot(n) / n.Dot(n);
-        Vertex y2 = v0 + xDelta * t;
-
-        Vertex vEdge = v2 - y2;
-        
-        float dy = 1.0f / vEdge.position.y;
-        yDelta = vEdge * dy;
-    }
-
-    int y0 = Math::Ceil(p0l.position.y);
-    int y1 = Math::Min(Math::Ceil(p1l.position.y), (int)_height, rect.y + rect.h);
+    int y0 = Math::Ceil(l0.position.y);
+    int y1 = Math::Min(Math::Ceil(l1.position.y), (int)_renderHeight, rect.y + rect.h);
 
     // calculate the vertical deltas down the edges of the triangle
-    Vertex yDeltaLeft = (p1l - p0l) / (p1l.position.y - p0l.position.y);
-    Vertex yDeltaRight = (p1r - p0r) / (p1r.position.y - p0r.position.y);
+    Vertex yDeltaLeft = (l1 - l0) / (l1.position.y - l0.position.y);
+    Vertex yDeltaRight = (r1 - r0) / (r1.position.y - r0.position.y);
 
-    p0l += yDeltaLeft * (Math::Ceil(p0l.position.y) - p0l.position.y);
-    p0r += yDeltaRight * (Math::Ceil(p0r.position.y) - p0r.position.y);
+    l0 += yDeltaLeft * (Math::Ceil(l0.position.y) - l0.position.y);
+    r0 += yDeltaRight * (Math::Ceil(r0.position.y) - r0.position.y);
 
+    Texture* tex = drawCall->obj->texture.get();
     Vec2 texSize = tex->size();
     float mipBias = tex->mipmapBias();
     int mipCount = tex->mipmapCount();
+    Shader* shader = drawCall->shader;
+    RenderBuffer<uint32_t>& outBuffer =
+        _antiAliasingMode == AntiAliasingMode::Off || _antiAliasingMode == AntiAliasingMode::MSAA_4X ?
+            _colorBuffer : _aaBuffer;
 
-    int y = y0;
     int yStart = min(rect.y, y1);
+    int startOff = max(yStart - y0, 0);
+    l0 += yDeltaLeft * (float)startOff;
+    r0 += yDeltaRight * (float)startOff;
+    int y = y0 + startOff;
 
-    for( ; y < yStart; ++y)
-    {
-        p0l += yDeltaLeft;
-        p0r += yDeltaRight;
-    }
-
-    // fill scanlines
     for( ; y < y1; ++y)
     {
-        int x = Math::Ceil(p0l.position.x);
-        int end = min(Math::Ceil(p0r.position.x), (int)_width);
+        int x = Math::Ceil(l0.position.x);
+        int end = min(Math::Ceil(r0.position.x), (int)_renderWidth);
 
-        uint32_t offset = y * _width + x;
-        uint32_t *colorBuffer = _colorBuffer.get() + offset;
-        float *depthBuffer = _depthBuffer.get() + offset;
+        Vertex xv = l0;
+        xv += xDelta * (Math::Ceil(l0.position.x) - l0.position.x);
 
-        Vertex xv = p0l;
-        xv += xDelta * (Math::Ceil(p0l.position.x) - p0l.position.x);
+        uint32_t rowOffset;
+        if(_antiAliasingMode == AntiAliasingMode::SSAA_2X)
+            rowOffset = outBuffer.GetSuperSampleRowOffset<2>(y);
+        else if(_antiAliasingMode == AntiAliasingMode::SSAA_4X)
+            rowOffset = outBuffer.GetSuperSampleRowOffset<4>(y);
+        else
+            rowOffset = y * _width;
 
         for( ; x < end; ++x)
         {
+            uint32_t offset;
+            if(_antiAliasingMode == AntiAliasingMode::SSAA_2X)
+                offset = rowOffset + outBuffer.GetSuperSampleColumnOffset<2>(x);
+            else if(_antiAliasingMode == AntiAliasingMode::SSAA_4X)
+                offset = rowOffset + outBuffer.GetSuperSampleColumnOffset<4>(x);
+            else
+                offset = rowOffset + x;
+
+            uint32_t *colorBuffer = outBuffer.data() + offset;
+            float *depthBuffer = _depthBuffer.data() + offset;
+
             if(xv.position.w > *depthBuffer)
             {
                 Vertex frag = xv / xv.position.w;
@@ -681,7 +875,8 @@ void RenderingContext::FillTriangle(const Rect& rect, const Vertex& v0, const Ve
                 Vec2 uv00 = frag.texcoord;
                 Vec2 uv01 = (xv.texcoord + xDelta.texcoord) / (xv.position.w + xDelta.position.w);
                 Vec2 uv10 = (xv.texcoord + yDelta.texcoord) / (xv.position.w + yDelta.position.w);
-                float mipLevel = CalcMipLevel(uv00, uv01, uv10, texSize, mipBias, mipCount);
+                float mipLevel = _mipmapsEnabled ?
+                        CalcMipLevel(uv00, uv01, uv10, texSize, mipBias, mipCount) : 0;
 
                 bool discard = false;
                 Color output = Color::Clamp(shader->ProcessPixel(frag, mipLevel, discard));
@@ -692,22 +887,181 @@ void RenderingContext::FillTriangle(const Rect& rect, const Vertex& v0, const Ve
                 }
             }
 
-            ++colorBuffer;
-            ++depthBuffer;
             xv += xDelta;
         }
 
-        p0l += yDeltaLeft;
-        p0r += yDeltaRight;
+        l0 += yDeltaLeft;
+        r0 += yDeltaRight;
+    }
+}
+
+void RenderingContext::Resolve(const Rect& rect)
+{
+    if(_antiAliasingMode == AntiAliasingMode::SSAA_2X)
+        ResolveSSAA2X(rect);
+    else if(_antiAliasingMode == AntiAliasingMode::SSAA_4X)
+        ResolveSSAA4X(rect);
+    else if(_antiAliasingMode == AntiAliasingMode::MSAA_4X && _rasterizationMode == RasterizationMode::Halfspace)
+        ResolveMSAA4X(rect);
+}
+
+void RenderingContext::ResolveSSAA2X(const Rect& rect)
+{
+    int destY = rect.y / 2;
+    int destW = rect.w / 2;
+    int destH = rect.h / 2;
+
+    uint32_t* src = _aaBuffer.data() + rect.y * rect.w;
+    uint32_t* dst = _colorBuffer.data() + destY * destW;
+    
+    int count = destW * destH;
+    while(count--)
+    {
+#if USE_SSE
+        __m128i c = _mm_load_si128((__m128i*)src);
+        c = _mm_avg_epu8(c, _mm_srli_si128(c, 4));
+        c = _mm_avg_epu8(c, _mm_srli_si128(c, 8));
+        *dst = _mm_cvtsi128_si32(c);
+#else
+        uint32_t bgra[4]{0, 0, 0, 0};
+
+        for(int i = 0; i < 4; ++i)
+        {
+            ColorBGRA* p = (ColorBGRA*)src + i;
+            bgra[0] += p->b;
+            bgra[1] += p->g;
+            bgra[2] += p->r;
+            bgra[3] += p->a;
+        }
+        
+        ColorBGRA* c = (ColorBGRA*)dst;
+        c->b = (uint8_t)(bgra[0] / 4);
+        c->g = (uint8_t)(bgra[1] / 4);
+        c->r = (uint8_t)(bgra[2] / 4);
+        c->a = (uint8_t)(bgra[3] / 4);
+#endif
+        src += 4;
+        dst += 1;
+    }
+}
+
+void RenderingContext::ResolveSSAA4X(const Rect& rect)
+{
+    int ry = rect.y / 4;
+    int rw = rect.w / 4;
+    int rh = rect.h / 4;
+
+    auto* src = _aaBuffer.data() + rect.y * rect.w;
+    auto* dst = _colorBuffer.data() + ry * rw;
+    
+    int count = rw * rh;
+    while(count--)
+    {
+#if USE_SSE
+        __m128i c = _mm_load_si128((__m128i*)src);
+        __m128i r = _mm_cvtepu8_epi32(c);
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 4)));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 8)));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 12)));
+        src += 4;
+        
+        c = _mm_load_si128((__m128i*)src);
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(c));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 4)));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 8)));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 12)));
+        src += 4;
+
+        c = _mm_load_si128((__m128i*)src);
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(c));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 4)));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 8)));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 12)));
+        src += 4;
+
+        c = _mm_load_si128((__m128i*)src);
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(c));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 4)));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 8)));
+        r = _mm_add_epi32(r, _mm_cvtepu8_epi32(_mm_srli_si128(c, 12)));
+        src += 4;
+
+        r = _mm_srli_epi32(r, 4);
+        r = _mm_packus_epi32(r, _mm_setzero_si128());
+        r = _mm_packus_epi16(r, _mm_setzero_si128());
+        *dst++ = _mm_cvtsi128_si32(r);
+#else
+        uint32_t bgra[4]{0, 0, 0, 0};
+
+        for(int i = 0; i < 16; ++i)
+        {
+            ColorBGRA* p = (ColorBGRA*)src + i;
+            bgra[0] += p->b;
+            bgra[1] += p->g;
+            bgra[2] += p->r;
+            bgra[3] += p->a;
+        }
+        
+        ColorBGRA* c = (ColorBGRA*)dst;
+        c->b = (uint8_t)(bgra[0] / 16);
+        c->g = (uint8_t)(bgra[1] / 16);
+        c->r = (uint8_t)(bgra[2] / 16);
+        c->a = (uint8_t)(bgra[3] / 16);
+        src += 16;
+        dst += 1;
+#endif
+    }
+}
+
+void RenderingContext::ResolveMSAA4X(const Rect& rect)
+{
+    uint32_t* src = _aaBuffer.data() + rect.y * rect.w * 4;
+    uint32_t* dst = _colorBuffer.data() + rect.y * rect.w;
+
+    int count = rect.w * rect.h;
+    while(count--)
+    {
+#if USE_SSE
+        __m128i c = _mm_load_si128((__m128i*)src);
+        c = _mm_avg_epu8(c, _mm_srli_si128(c, 4));
+        c = _mm_avg_epu8(c, _mm_srli_si128(c, 8));
+        *dst = _mm_cvtsi128_si32(c);
+#else
+        uint32_t bgra[4]{0, 0, 0, 0};
+
+        for(int i = 0; i < 4; ++i)
+        {
+            ColorBGRA* p = (ColorBGRA*)src + i;
+            bgra[0] += p->b;
+            bgra[1] += p->g;
+            bgra[2] += p->r;
+            bgra[3] += p->a;
+        }
+        
+        ColorBGRA* c = (ColorBGRA*)dst;
+        c->b = (uint8_t)(bgra[0] / 4);
+        c->g = (uint8_t)(bgra[1] / 4);
+        c->r = (uint8_t)(bgra[2] / 4);
+        c->a = (uint8_t)(bgra[3] / 4);
+#endif
+        src += 4;
+        dst += 1;
     }
 }
 
 void RenderingContext::Clear(bool colorBuffer, bool depthBuffer)
 {
-    uint32_t pixelCount = _width * _height;
-    Color alignedClearColor = _clearColor;
-    if(colorBuffer) std::fill(_colorBuffer.get(), _colorBuffer.get() + pixelCount, (uint32_t)alignedClearColor);
-    if(depthBuffer) std::fill(_depthBuffer.get(), _depthBuffer.get() + pixelCount, 0.0f);
+    if(colorBuffer)
+    {
+        if(_antiAliasingMode == AntiAliasingMode::Off
+        || (_antiAliasingMode == AntiAliasingMode::MSAA_4X && _rasterizationMode == RasterizationMode::Scanline))
+            _colorBuffer.Fill(_clearColor);
+        else
+            _aaBuffer.Fill(_clearColor);
+    }
+
+    if(depthBuffer)
+        _depthBuffer.Fill(0);
 }
 
 void RenderingContext::Present()
@@ -737,8 +1091,7 @@ void RenderingContext::Present()
     bmi.bmiHeader.biClrImportant = 0;
 
     HDC hDC = GetDC(_hWndTarget);
-    StretchDIBits(hDC, rc.x, rc.y, rc.w, rc.h, 0, 0, _width, _height, _colorBuffer.get(), (BITMAPINFO*)&bmi, DIB_RGB_COLORS, SRCCOPY);
-    //SetDIBitsToDevice(hDC, 0, 0, _width, _height, 0, 0, 0, _height, _colorBuffer.get(), (BITMAPINFO*)&bmi, DIB_RGB_COLORS);
+    StretchDIBits(hDC, rc.x, rc.y, rc.w, rc.h, 0, 0, _width, _height, _colorBuffer.data(), (BITMAPINFO*)&bmi, DIB_RGB_COLORS, SRCCOPY);
+    //SetDIBitsToDevice(hDC, 0, 0, _width, _height, 0, 0, 0, _height, _colorBuffer.data(), (BITMAPINFO*)&bmi, DIB_RGB_COLORS);
     ReleaseDC(_hWndTarget, hDC);
 }
-

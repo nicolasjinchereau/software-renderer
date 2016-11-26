@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <ostream>
+#include "SIMD.h"
 
 // left handed row-major math library
 
@@ -40,13 +41,13 @@ public:
     Vec2 operator-() const;
     Vec2 operator+(const Vec2& v) const;
     Vec2 operator-(const Vec2& v) const;
-    Vec2 operator*(const float s) const;
-    Vec2 operator/(const float s) const;
+    Vec2 operator*(float s) const;
+    Vec2 operator/(float s) const;
     float operator*(const Vec2& v) const;
     Vec2& operator+=(const Vec2& v);
     Vec2& operator-=(const Vec2& v);
-    Vec2& operator*=(const float s);
-    Vec2& operator/=(const float s);
+    Vec2& operator*=(float s);
+    Vec2& operator/=(float s);
     bool operator==(const Vec2& v) const;
     bool operator!=(const Vec2& v) const;
     Vec2 PerpCW() const;
@@ -61,16 +62,21 @@ public:
     void Normalize();
     Vec2 Normalized() const;
     bool IsNormalized() const;
+
+    friend std::ostream& operator<<(std::ostream& os, const Vec2& v);
 };
 
 ////////////////////////////////
 //    Vec3
 ////////////////////////////////
 
-class Vec3
+class alignas(16) Vec3
 {
 public:
-    float x, y, z;
+    union {
+        struct { float x, y, z; };
+        __m128 m;
+    };
 
     static const Vec3 zero;
     static const Vec3 forward;
@@ -80,6 +86,7 @@ public:
     Vec3(){}
     Vec3(float x, float y, float z) : x(x), y(y), z(z){}
     Vec3(const Vec2& v) : x(v.x), y(v.y), z(0){}
+    Vec3(__m128 m) : m(m){}
     operator Vec2() const { return Vec2(x, y); }
 
     Vec3 operator-() const;
@@ -102,6 +109,8 @@ public:
     float Dot(const Vec3& v) const;
     float Dot(const Plane& p) const;
     Vec3 Cross(const Vec3& v) const;
+    float Angle(const Vec3& v) const;
+    float MaxAcuteAngle(const Vec3& v) const;
     float Length() const;
     float LengthSq() const;
     float Distance(const Vec3& v) const;
@@ -109,6 +118,7 @@ public:
     void Normalize();
     Vec3 Normalized() const;
     bool IsNormalized() const;
+
     friend std::ostream& operator<<(std::ostream& os, const Vec3& v);
 };
 
@@ -119,7 +129,10 @@ public:
 class alignas(16) Vec4
 {
 public:
-    float x, y, z, w;
+    union {
+        struct { float x, y, z, w; };
+        __m128 m;
+    };
 
     static const Vec4 zero;
     static const Vec4 forward;
@@ -132,20 +145,21 @@ public:
     Vec4(const Vec2& v, float z, float w) : x(v.x), y(v.y), z(z), w(w){}
     Vec4(const Vec3& v) : x(v.x), y(v.y), z(v.z), w(0){}
     Vec4(const Vec3& v, float w) : x(v.x), y(v.y), z(v.z), w(w){}
+    Vec4(__m128 m) : m(m){}
     operator Vec2() const { return Vec2(x, y); }
     operator Vec3() const { return Vec3(x, y, z); }
     
     Vec4 operator-() const;
     Vec4 operator+(const Vec4& v) const;
     Vec4 operator-(const Vec4& v) const;
-    Vec4 operator*(const float s) const;
-    Vec4 operator/(const float s) const;
+    Vec4 operator*(float s) const;
+    Vec4 operator/(float s) const;
     float operator*(const Vec4& v) const;
     Vec4 operator*(const Mat4& m) const;
     Vec4& operator+=(const Vec4& v);
     Vec4& operator-=(const Vec4& v);
-    Vec4& operator*=(const float s);
-    Vec4& operator/=(const float s);
+    Vec4& operator*=(float s);
+    Vec4& operator/=(float s);
     Vec4& operator*=(const Mat4& m);
     bool operator==(const Vec4& v) const;
     bool operator!=(const Vec4& v) const;
@@ -159,6 +173,8 @@ public:
     void Normalize();
     Vec4 Normalized() const;
     bool IsNormalized() const;
+
+    friend std::ostream& operator<<(std::ostream& os, const Vec4& v);
 };
 
 ////////////////////////////////
@@ -210,6 +226,8 @@ public:
     static Mat3 Translation(float x, float y);
     static Mat3 Ortho2D(float left, float right, float bottom, float top);
     static Mat3 LookRotation(const Vec3& forward, const Vec3& upward);
+
+    friend std::ostream& operator<<(std::ostream& os, const Mat3& m);
 };
 
 ////////////////////////////////
@@ -222,11 +240,16 @@ public:
     static const Mat4 zero;
     static const Mat4 identity;
     
-    float m11, m12, m13, m14, //row 1
-          m21, m22, m23, m24, //row 2
-          m31, m32, m33, m34, //row 3
-          m41, m42, m43, m44; //row 4
-    
+    union {
+        struct {
+            float m11, m12, m13, m14, //row 1
+                  m21, m22, m23, m24, //row 2
+                  m31, m32, m33, m34, //row 3
+                  m41, m42, m43, m44; //row 4
+        };
+        __m128 mm[4];
+    };
+
     Mat4(){}
     Mat4(float m11, float m12, float m13, float m14,
          float m21, float m22, float m23, float m24,
@@ -277,13 +300,15 @@ public:
     static Mat4 Ortho2D(float left, float right, float bottom, float top, float zNear, float zFar);
     static Mat4 Project3D(float fov, float width, float height, float near, float far);
     static Mat4 Project3D(float fov, float aspect, float near, float far);
+
+    friend std::ostream& operator<<(std::ostream& os, const Mat4& m);
 };
 
 ////////////////////////////////
 //    Quat
 ////////////////////////////////
 
-class alignas(16) Quat
+class Quat
 {
 public:
     Vec3 v;
@@ -328,6 +353,8 @@ public:
 
     void ToAngleAxis(float& angle, Vec3& axis) const;
     Vec3 ToEulerAngles() const;
+
+    friend std::ostream& operator<<(std::ostream& os, const Quat& q);
 };
 
 ////////////////////////////////
@@ -358,21 +385,28 @@ public:
 //    Plane
 ////////////////////////////////
 
-class Plane
+class alignas(16) Plane
 {
 public:
-    float a, b, c, d;
+    union {
+        struct { float a, b, c, d; };
+        __m128 m;
+    };
 
     Plane(){}
     Plane(float a, float b, float c, float d)
         : a(a), b(b), c(c), d(d){}
-    
+    Plane(const Vec3& normal, const Vec3& point)
+        : a(normal.x), b(normal.y), c(normal.z), d(-point.Dot(normal)){}
+    Plane(__m128 m) : m(m){}
+
     void Normalize();
     Vec3 Normal() const;
     bool InFront(const Vec3& point) const;
     bool InBack(const Vec3& point) const;
     bool InFront(const Sphere& sphere) const;
     bool InBack(const Sphere& sphere) const;
+    float Distance(const Vec3& p) const;
     operator Vec4() const;
 };
 
@@ -390,6 +424,32 @@ public:
     Triangle(){}
     Triangle(const Vec3& a, const Vec3& b, const Vec3& c)
         : a(a), b(b), c(c) {}
+};
+
+////////////////////////////////
+//    BarycentricTriangle
+////////////////////////////////
+
+class BarycentricTriangle
+{
+    Vec2 a;
+    Vec2 v0;
+    Vec2 v1;
+    float num = 0;
+public:
+    BarycentricTriangle(const Vec2& a, const Vec2& b, const Vec2& c);
+    bool empty() const;
+    Vec3 GetCoordinates(const Vec2& p) const;
+
+    template<typename Vtype>
+    auto Interpolate(Vtype&& vert0, Vtype&& vert1, Vtype&& vert2, const Vec2& p)
+    {
+        Vec2 v2 = p - a;
+        float v = (v2.x * v1.y - v1.x * v2.y) * num;
+        float w = (v0.x * v2.y - v2.x * v0.y) * num;
+        float u = 1.0f - v - w;
+        return vert0 * u + vert1 * v + vert2 * w;
+    }
 };
 
 ////////////////////////////////
@@ -448,38 +508,7 @@ public:
     Rect(int x, int y, int w, int h)
         : x(x), y(y), w(w), h(h){}
 
-    void FitInto(const Rect& rc)
-    {
-        float wx = (float)rc.x;
-        float wy = (float)rc.y;
-        float ww = (float)rc.w;
-        float wh = (float)rc.h;
-
-        float s = 1.0f;
-
-        if(w > h)
-        {
-            s = wh / (float)h;
-
-            if((float)w * s > ww)
-                s = ww / (float)w;
-        }
-        else
-        {
-            s = ww / (float)w;
-
-            if((float)h * s > wh)
-                s = wh / (float)h;
-        }
-
-        float sw = (float)w * s;
-        float sh = (float)h * s;
-
-        x = wx + (sw < ww - 0.5f) ? (int)((ww - sw) * 0.5f) : 0;
-        y = ww + (sh < wh - 0.5f) ? (int)((wh - sh) * 0.5f) : 0;
-        w = (int)sw;
-        h = (int)sh;
-    }
+    void FitInto(const Rect& rc);
 };
 
 ////////////////////////////////
@@ -531,11 +560,11 @@ public:
 class alignas(16) Color
 {
 public:
-    float r;
-    float g;
-    float b;
-    float a;
-
+    union {
+        struct { float r, g, b, a; };
+        __m128 m;
+    };
+    
     static const Color red;
     static const Color green;
     static const Color blue;
@@ -554,9 +583,9 @@ public:
         : r(r), g(g), b(b), a(a){}
     Color(const Vec4& v)
         : r(v.x), g(v.y), b(v.z), a(v.w){}
-
     Color(Color32 c);
     Color(uint32_t c);
+    Color(__m128 m) : m(m){}
 
     Color& operator=(const Vec4& v);
     Color operator+(const Color& c) const;
@@ -566,6 +595,7 @@ public:
     Color& operator*=(float s);
     Color& operator*=(const Color& c);
     Color& operator+=(const Color& c);
+    Color& operator-=(const Color& c);
     Color Blend(const Color& dst) const;
     static Color Lerp(const Color& a, const Color& b, float t);
     static Color Clamp(const Color& c, float lower = 0.0f, float upper = 1.0f);
@@ -594,20 +624,18 @@ public:
 //    Misc
 ////////////////////////////////
 
-
-std::ostream& operator<<(std::ostream& os, const Vec4& v);
-std::ostream& operator<<(std::ostream& os, const Mat3& m);
-std::ostream& operator<<(std::ostream& os, const Mat4& m);
-std::ostream& operator<<(std::ostream& os, const Quat& q);
-
 namespace Math
 {
+#pragma float_control(except, off, push)
+#pragma fenv_access(off)
     constexpr float Pi = 3.141592654f;
     constexpr float HalfPi = Pi / 2.0f;
     constexpr float TwoPi = Pi * 2.0f;
     constexpr float DegToRad = Pi / 180.0f;
     constexpr float RadToDeg = 180.0f / Pi;
     constexpr float FloatTolerance = FLT_EPSILON * 3;
+    constexpr float InvColorMax = 1.0f / 255.0f;
+#pragma float_control(pop)
 
     inline float ToRadians(float degrees) {
         return degrees * DegToRad;
@@ -648,7 +676,7 @@ namespace Math
 
     template<typename T>
     inline T Min(T a) {
-        return std::forward<T>(a);
+        return a;
     }
 
     template<typename T, typename... Ts>
@@ -668,7 +696,8 @@ namespace Math
 
     template<typename T>
     inline T Clamp(T x, T lower, T upper) {
-        return (x < lower) ? lower : ((x > upper) ? upper : x);
+        x = x > upper ? upper : x;
+        return x < lower ? lower : x;
     }
 
     inline float Clamp01(float value) {
@@ -677,10 +706,23 @@ namespace Math
     }
 
     template<typename T>
-    inline T NormalizedClamp(T x, T lower, T upper) {
+    inline T NormalizedClamp(T x, T lower, T upper)
+    {
+#if USE_SSE
+        float ret;
+        __m128 _x = _mm_sub_ss(_mm_load_ss(&x), _mm_load_ss(&lower));
+        _x = _mm_max_ss(_x, _mm_set_ss(FLT_EPSILON));
+        __m128 range = _mm_sub_ss(_mm_load_ss(&upper), _mm_load_ss(&lower));
+        range = _mm_max_ss(range, _mm_set_ss(FLT_EPSILON));
+        _x = _mm_div_ss(_x, range);
+        _x = _mm_min_ss(_x, _mm_set_ss(1.0f));
+        _mm_store_ss(&ret, _x);
+        return ret;
+#else
         float range = upper - lower;
         return (range < FLT_EPSILON) ?
             Clamp01(x - lower) : Clamp01((x - lower) / range);
+#endif
     }
 
     inline float Snap(float n, float span)

@@ -154,36 +154,31 @@ void Model::RecalcBounds()
     size_t vertCount = vertices.size();
     if(vertCount > 0)
     {
-        Vec3 center = vertices[0].position;
-        bbox.vmin = vertices[0].position;
-        bbox.vmax = vertices[0].position;
-
-        for(uint32_t v = 1; v < vertCount; v++)
+        Vec3 center = Vec3::zero;
+        bbox.vmin = Vec3(FLT_MAX, FLT_MAX, FLT_MAX);
+        bbox.vmax = Vec3(FLT_MIN, FLT_MIN, FLT_MIN);
+        
+        for(auto& v : vertices)
         {
-            bbox.vmin.x = min(bbox.vmin.x, vertices[v].position.x);
-            bbox.vmin.y = min(bbox.vmin.y, vertices[v].position.y);
-            bbox.vmin.z = min(bbox.vmin.z, vertices[v].position.z);
-            bbox.vmax.x = max(bbox.vmax.x, vertices[v].position.x);
-            bbox.vmax.y = max(bbox.vmax.y, vertices[v].position.y);
-            bbox.vmax.z = max(bbox.vmax.z, vertices[v].position.z);
-
-            center += vertices[v].position;
+            center += v.position;
+            bbox.vmin.x = min(bbox.vmin.x, v.position.x);
+            bbox.vmin.y = min(bbox.vmin.y, v.position.y);
+            bbox.vmin.z = min(bbox.vmin.z, v.position.z);
+            bbox.vmax.x = max(bbox.vmax.x, v.position.x);
+            bbox.vmax.y = max(bbox.vmax.y, v.position.y);
+            bbox.vmax.z = max(bbox.vmax.z, v.position.z);
         }
 
         center /= (float)vertCount;
 
         float radius = 0.0f;
 
-        for(uint32_t v = 0; v < vertCount; v++)
-        {
-            radius = max(radius, (vertices[v].position - center).LengthSq());
-        }
-
+        for(auto& v : vertices)
+            radius = max(radius, center.DistanceSq(v.position));
+        
         if(radius > 0.0f)
-        {
             radius = sqrt(radius);
-        }
-
+        
         bsphere = Sphere(center, radius);
     }
 }

@@ -11,6 +11,13 @@
 #include "Transform.h"
 using namespace std;
 
+enum class CullMode
+{
+    None,
+    Back,
+    Front
+};
+
 class alignas(16) SceneObject
 {
 public:
@@ -19,12 +26,13 @@ public:
     shared_ptr<Model> model;
     shared_ptr<Texture> texture;
     shared_ptr<Shader> shader;
-    bool backfaceCullingEnabled;
+    CullMode cullMode;
 
     SceneObject(const string& name,
                 const shared_ptr<Model>& model,
                 const shared_ptr<Texture>& texture,
-                const shared_ptr<Shader>& shader);
+                const shared_ptr<Shader>& shader,
+                CullMode cullMode = CullMode::Back);
 
     Sphere GetWorldBoundingSphere();
 };

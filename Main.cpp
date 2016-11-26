@@ -23,20 +23,19 @@
 using namespace std;
 
 // Controls:
-//   W:           forward
-//   A:           left
-//   S:           back
-//   D:           right
-//   Q:           up
-//   E:           down
-//   Left-click:  mouse look
-//   P:           use point texture filtering
-//   B:           use bilinear texture filtering
-//   T:           use trilinear texture filtering
-//   M:           toggle mipmaps
-//   L:           toggle lighting
-//   C:           toggle framerate cap
-//   R:           reload scene_settings.json
+//   W:    forward
+//   A:    left
+//   S:    back
+//   D:    right
+//   Q:    up
+//   E:    down
+//   LMB:  mouse look
+//   T:    cycle tex filter (point, bilinear, trilinear)
+//   M:    toggle mipmaps
+//   L:    toggle lighting
+//   F:    cycle antialiasing (None, 4x MSAA, 2x SSAA, 4x SSAA)
+//   C:    toggle framerate cap
+//   R:    reload scene_settings.json
 
 class RenderingApp : public Application
 {
@@ -139,26 +138,21 @@ public:
         // create camera
         xAngle = 1.0f;
         yAngle = 124.0f;
-        shared_ptr<Camera> cam = AlignedMakeShared<Camera, 16>(60.0f, (float)clientWidth() / (float)clientHeight(), 0.1f, 1000.0f);
+        shared_ptr<Camera> cam = AlignedMakeShared<Camera, 16>(60.0f, (float)clientWidth() / (float)clientHeight(), 0.1f, 300.0f);
         cam->transform.SetPosition(-13.8f, 1.6f, 9.0f);
         cam->transform.SetRotation(xAngle, yAngle, 0.0f);
         
         // create scene objects
         auto houseObj = AlignedMakeShared<SceneObject, 16>("house", houseModel, houseTex, litShader);
         auto house2Obj = AlignedMakeShared<SceneObject, 16>("house2", house2Model, house2Tex, litShader);
-        auto plants1Obj = AlignedMakeShared<SceneObject, 16>("plants1", plantsModel, plantsTex, litCutoutShader);
-        auto plants2Obj = AlignedMakeShared<SceneObject, 16>("plants2", plantsModel, plantsTex, litCutoutShader);
-        auto plants3Obj = AlignedMakeShared<SceneObject, 16>("plants3", plantsModel, plantsTex, litCutoutShader);
-        plants1Obj->backfaceCullingEnabled = false;
-        plants2Obj->backfaceCullingEnabled = false;
-        plants3Obj->backfaceCullingEnabled = false;
+        auto plants1Obj = AlignedMakeShared<SceneObject, 16>("plants1", plantsModel, plantsTex, litCutoutShader, CullMode::None);
+        auto plants2Obj = AlignedMakeShared<SceneObject, 16>("plants2", plantsModel, plantsTex, litCutoutShader, CullMode::None);
+        auto plants3Obj = AlignedMakeShared<SceneObject, 16>("plants3", plantsModel, plantsTex, litCutoutShader, CullMode::None);
         auto carObj = AlignedMakeShared<SceneObject, 16>("car", carModel, carTex, litShader);
         auto lampObj = AlignedMakeShared<SceneObject, 16>("lamp", lampModel, lampTex, litShader);
         auto rockObj = AlignedMakeShared<SceneObject, 16>("rock", rockModel, rockTex, litShader);
-        auto yuccaTreeObj1 = AlignedMakeShared<SceneObject, 16>("yucca1", yuccaTreeModel, yuccaTreeTex, litShader);
-        yuccaTreeObj1->backfaceCullingEnabled = false;
-        auto yuccaTreeObj2 = AlignedMakeShared<SceneObject, 16>("yucca2", yuccaTreeModel, yuccaTreeTex, litShader);
-        yuccaTreeObj2->backfaceCullingEnabled = false;
+        auto yuccaTreeObj1 = AlignedMakeShared<SceneObject, 16>("yucca1", yuccaTreeModel, yuccaTreeTex, litShader, CullMode::None);
+        auto yuccaTreeObj2 = AlignedMakeShared<SceneObject, 16>("yucca2", yuccaTreeModel, yuccaTreeTex, litShader, CullMode::None);
         auto terrainObj = AlignedMakeShared<SceneObject, 16>("terrain", terrainModel, terrainTex, litShader);
         auto skyObj = AlignedMakeShared<SceneObject, 16>("sky", skyModel, skyNightTex, unlitShader);
         
@@ -222,10 +216,40 @@ public:
         if(fps != lastFps)
         {
             lastFps = fps;
-            setWindowTitle("Software Rendering - "s + to_string(lastFps) + " fps");
+            setWindowTitle(makeTitle());
         }
 
         return true;
+    }
+
+    std::string makeTitle()
+    {
+        static const char* aaModes[]{
+            "Off",
+            "4X MSAA",
+            "2X SSAA",
+            "4X SSAA",
+        };
+        
+        static const char* filterModes[]{
+            "Point",
+            "Bilinear",
+            "Trilinear",
+        };
+        
+        static const char* offOn[]{
+            "Off",
+            "On",
+        };
+
+        const char* aaMode = aaModes[(int)context->antiAliasingMode()];
+        const char *filtMode = filterModes[(int)filterMode];
+        const char* mipmaps = offOn[context->mipmapsEnabled() ? 1 : 0];
+        
+        char buff[256];
+        sprintf_s(buff, "%ux%u - Tex Filter: %s - Mipmaps: %s - AA: %s - FPS: %u",
+                  context->width(), context->height(), filtMode, mipmaps, aaMode, lastFps);
+        return buff;
     }
 
     void UpdateCamera()
@@ -270,16 +294,13 @@ public:
     virtual void OnKeyDown(KeyCode key) override {
         switch(key)
         {
-        case KeyCode::P:
-            SetTextureFilters(FilterMode::Point);
-            break;
-
-        case KeyCode::B:
-            SetTextureFilters(FilterMode::Bilinear);
-            break;
-
         case KeyCode::T:
-            SetTextureFilters(FilterMode::Trilinear);
+            if(filterMode == FilterMode::Point)
+                SetTextureFilters(FilterMode::Bilinear);
+            else if(filterMode == FilterMode::Bilinear)
+                SetTextureFilters(FilterMode::Trilinear);
+            else
+                SetTextureFilters(FilterMode::Point);
             break;
 
         case KeyCode::M:
@@ -301,6 +322,18 @@ public:
 
         case KeyCode::R:
             scene->ApplySettings("scene/scene_settings.json");
+            break;
+
+        case KeyCode::F:
+            if(context->antiAliasingMode() == AntiAliasingMode::Off)
+                context->antiAliasingMode(AntiAliasingMode::MSAA_4X);
+            else if(context->antiAliasingMode() == AntiAliasingMode::MSAA_4X)
+                context->antiAliasingMode(AntiAliasingMode::SSAA_2X);
+            else if(context->antiAliasingMode() == AntiAliasingMode::SSAA_2X)
+                context->antiAliasingMode(AntiAliasingMode::SSAA_4X);
+            else
+                context->antiAliasingMode(AntiAliasingMode::Off);
+
             break;
 
         case KeyCode::Space:

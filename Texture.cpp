@@ -11,6 +11,7 @@
 #include <fstream>
 #include <string>
 #include <locale>
+#include <algorithm>
 using namespace std;
 
 Texture::Texture(const string &filename, FilterMode filterMode)
@@ -186,30 +187,30 @@ Color Texture::GetPixel(const Vec2 &uv, float mipLevel)
 
 Color Texture::GetPoint(const Vec2 &uv, float mipLevel)
 {
-    Mipmap& mm = _mipmaps[Math::Floor(mipLevel)];
-    uint32_t map_w = mm.width;
-    uint32_t map_h = mm.height;
+    Mipmap& mm = _mipmaps[(int)mipLevel];
+    int map_w = mm.width;
+    int map_h = mm.height;
 
-    float u = Math::Clamp(uv.x, 0.0f, 1.0f);
-    float v = Math::Clamp(uv.y, 0.0f, 1.0f);
-    uint32_t x = (uint32_t)((float)(map_w - 1) * u + 0.5f);
-    uint32_t y = (uint32_t)((float)(map_h - 1) * v + 0.5f);
-    return mm.pixels[y * map_w + x];
+    float x = uv.x * (float)map_w;
+    float y = uv.y * (float)map_h;
+    int ix = Math::Clamp((int)x, 0, map_w - 1);
+    int iy = Math::Clamp((int)y, 0, map_h - 1);
+    return mm.pixels[iy * map_w + ix];
 }
 
 Color Texture::GetBilinear(const Vec2 &uv, float mipLevel)
 {
-    Mipmap& mm = _mipmaps[Math::Floor(mipLevel)];
-    uint32_t map_w = mm.width;
-    uint32_t map_h = mm.height;
+    Mipmap& mm = _mipmaps[(int)mipLevel];
+    int map_w = mm.width;
+    int map_h = mm.height;
 
     float x = uv.x * (float)map_w;
     float y = uv.y * (float)map_h;
-    uint32_t ix = min((uint32_t)x, map_w - 1);
-    uint32_t iy = min((uint32_t)y, map_h - 1);
+    int ix = Math::Clamp((int)x, 0, map_w - 1);
+    int iy = Math::Clamp((int)y, 0, map_h - 1);
 
-    uint32_t xoff = (ix < map_w - 1) ? 1 : 0;
-    uint32_t yoff = (iy < map_h - 1) ? 1 : 0;
+    int xoff = (ix < map_w - 1);
+    int yoff = (iy < map_h - 1);
 
     Color32* p00 = mm.pixels + iy * map_w + ix;
     Color32* p01 = p00 + xoff;
@@ -226,7 +227,38 @@ Color Texture::GetBilinear(const Vec2 &uv, float mipLevel)
     int colors[4]{ *(int*)p00, *(int*)p01, *(int*)p10, *(int*)p11 };
 
     Color ret;
-    vblend2x2(colors, coeffs, &ret.r);
+    __m128 mcoeffs = _mm_load_ps(coeffs);
+
+    //u0, u1, u0, u1
+    __m128 us = _mm_movelh_ps(mcoeffs, mcoeffs);
+
+    //v0, v0, v1, v1
+    __m128 vs = _mm_unpackhi_ps(mcoeffs, mcoeffs);
+
+    //u0 * v0
+    //u1 * v0
+    //u0 * v1
+    //u1 * v1
+    __m128 w = _mm_mul_ps(us, vs);
+
+    __m128 maxChan = _mm_set_ps1(1.0f / 255.0f);
+
+    __m128 c0 = _mm_cvtepi32_ps(_mm_cvtepu8_epi32(_mm_cvtsi32_si128(colors[0])));
+    c0 = _mm_mul_ps(c0, maxChan);
+    __m128 r = _mm_mul_ps(c0, _mm_shuffle_ps(w, w, 0b00000000));
+
+    __m128 c1 = _mm_cvtepi32_ps(_mm_cvtepu8_epi32(_mm_cvtsi32_si128(colors[1])));
+    c1 = _mm_mul_ps(c1, maxChan);
+    r = _mm_add_ps(_mm_mul_ps(c1, _mm_shuffle_ps(w, w, 0b01010101)), r);
+
+    __m128 c2 = _mm_cvtepi32_ps(_mm_cvtepu8_epi32(_mm_cvtsi32_si128(colors[2])));
+    c2 = _mm_mul_ps(c2, maxChan);
+    r = _mm_add_ps(_mm_mul_ps(c2, _mm_shuffle_ps(w, w, 0b10101010)), r);
+
+    __m128 c3 = _mm_cvtepi32_ps(_mm_cvtepu8_epi32(_mm_cvtsi32_si128(colors[3])));
+    c3 = _mm_mul_ps(c3, maxChan);
+    ret.m = _mm_add_ps(_mm_mul_ps(c3, _mm_shuffle_ps(w, w, 0b11111111)), r);
+    
     return ret;
 #else
     float u1 = x - (float)ix;
@@ -257,7 +289,7 @@ Color Texture::GetTrilinear(const Vec2 &uv, float mipLevel)
     }
     else
     {
-        float t = mipLevel - (int)mipLevel;
+        float t = mipLevel - mip1;
         return Color::Lerp(Texture::GetBilinear(uv, (float)mip1),
                            Texture::GetBilinear(uv, (float)mip2),
                            t);
