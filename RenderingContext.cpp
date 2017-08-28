@@ -14,7 +14,8 @@
 
 RenderingContext::RenderingContext(Application* app, uint32_t width, uint32_t height, size_t threadCount)
 {
-    this->_hWndTarget = (HWND)app->nativeWindowHandle();
+    _hWndTarget = (HWND)app->nativeWindowHandle();
+    _hDCTarget = GetDC(_hWndTarget);
 
     _width = width;
     _height = height;
@@ -1090,8 +1091,6 @@ void RenderingContext::Present()
     bmi.bmiHeader.biClrUsed = 0;
     bmi.bmiHeader.biClrImportant = 0;
 
-    HDC hDC = GetDC(_hWndTarget);
-    StretchDIBits(hDC, rc.x, rc.y, rc.w, rc.h, 0, 0, _width, _height, _colorBuffer.data(), (BITMAPINFO*)&bmi, DIB_RGB_COLORS, SRCCOPY);
+    StretchDIBits(_hDCTarget, rc.x, rc.y, rc.w, rc.h, 0, 0, _width, _height, _colorBuffer.data(), (BITMAPINFO*)&bmi, DIB_RGB_COLORS, SRCCOPY);
     //SetDIBitsToDevice(hDC, 0, 0, _width, _height, 0, 0, 0, _height, _colorBuffer.data(), (BITMAPINFO*)&bmi, DIB_RGB_COLORS);
-    ReleaseDC(_hWndTarget, hDC);
 }

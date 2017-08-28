@@ -107,4 +107,5 @@ private:
     vector<unique_ptr<RenderThread>> _renderThreads;
     ShaderList _shaders;
     HWND _hWndTarget;
+    HDC _hDCTarget;
 };

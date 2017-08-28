@@ -84,18 +84,18 @@ bool Application::CreateAppWindow()
     HINSTANCE hInstance = GetModuleHandle(NULL);
 
     WNDCLASSEX wcex;
-    wcex.cbSize            = sizeof(WNDCLASSEX);
-    wcex.style            = CS_HREDRAW | CS_VREDRAW;
+    wcex.cbSize         = sizeof(WNDCLASSEX);
+    wcex.style          = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
     wcex.lpfnWndProc    = WndProc;
-    wcex.cbClsExtra        = 0;
-    wcex.cbWndExtra        = 0;
-    wcex.hInstance        = hInstance;
-    wcex.hIcon            = 0;
-    wcex.hCursor        = LoadCursor(NULL, IDC_ARROW);
-    wcex.hbrBackground    = (HBRUSH)(COLOR_WINDOW + 1);
-    wcex.lpszMenuName    = 0;
-    wcex.lpszClassName    = _windowClass.c_str();
-    wcex.hIconSm        = 0;
+    wcex.cbClsExtra     = 0;
+    wcex.cbWndExtra     = 0;
+    wcex.hInstance      = hInstance;
+    wcex.hIcon          = NULL;
+    wcex.hCursor        = NULL;
+    wcex.hbrBackground  = NULL;
+    wcex.lpszMenuName   = 0;
+    wcex.lpszClassName  = _windowClass.c_str();
+    wcex.hIconSm        = NULL;
     RegisterClassEx(&wcex);
 
     RECT windowRect = { 0, 0, _clientWidth, _clientHeight };
